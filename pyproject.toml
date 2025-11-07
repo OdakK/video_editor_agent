@@ -1,0 +1,24 @@
+[project]
+name = "video-agent"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "langchain>=1.0.2",
+    "langchain-google-genai>=3.0.0",
+    "langgraph>=0.2.60",
+    "langgraph-cli[inmem]>=0.4.6",
+    "python-dotenv>=1.0.0",
+    "langchain-openai>=1.0.1",
+    "langgraph-api>=0.4.9",
+    "faster-whisper>=1.0.0",
+    "scenedetect==0.6.7",
+    "opencv-python>=4.8.1",
+    "pillow>=10.2.0",
+    "transformers>=4.37.2",
+    "torch>=2.1.2",
+    "sentence-transformers>=2.7.0",
+    "numpy>=1.26.0",
+    "opentimelineio>=0.15.0"
+]

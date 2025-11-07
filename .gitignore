@@ -1,0 +1,22 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# OS / editor cruft
+.DS_Store
+
+# Virtual environments
+.venv
+input_rushed
+output
+
+# Local runtime artifacts
+.env
+.langgraph_api/
+timeline.otio
+preview.mp4
+media_store.db
