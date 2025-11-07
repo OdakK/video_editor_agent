@@ -1,0 +1,8 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "agent": "./src/workflows/agent.py:agent",
+    "analysis": "./src/workflows/analysis.py:create_analysis_workflow"
+  },
+  "env": ".env"
+}
