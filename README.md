@@ -1,165 +1,165 @@
-## Video Editor Agent
+# 🎬 Video Editor Agent
 
-End-to-end LangGraph project that (1) analyzes local rushes, (2) builds a searchable
-media store, and (3) exposes a conversational editing agent capable of assembling
-an OpenTimelineIO sequence and rendering previews with ffmpeg.
+**Edit video by talking to an agent.** Drop your raw footage in a folder, let the pipeline watch and listen to it, then ask for a rough cut in plain language:
 
-### Quick Start
+> *"Find the shot where she talks about the blue sky, put it at the start, then add the wide shot of the beach after it and render a preview."*
 
-1. Copy environment defaults and fill in secrets:
-   ```bash
-   cp .env.example .env
-   # edit .env with your LangSmith/Azure/OpenAI keys and custom paths if needed
-   ```
-2. Install dependencies (uv recommended):
-   ```bash
-   uv sync
-   ```
-3. Run the analysis once to generate `output/analysis_bundle.json` (or point
-   `MEDIA_BUNDLE_PATH` to your own artifacts):
-   ```bash
-   python main.py --input-dir ./input_rushed --output-dir ./output
-   ```
-4. Launch the LangGraph dev server for LangSmith-powered tracing and the conversational editor:
-   ```bash
-   langgraph dev --allow-blocking
-   ```
-   This boots the LangGraph runtime locally (with LangSmith observability if your
-   `LANGSMITH_API_KEY` is set) and provides the editing agent with the media-store
-   search tools _plus_ the OTIO timeline actions described below.
+The agent searches your rushes by meaning or by keyword, places shots on an [OpenTimelineIO](https://opentimelineio.readthedocs.io/) timeline, cuts clips, and renders an MP4 preview with ffmpeg. Everything runs locally except the LLM call.
 
-### Features
-- Whisper-based transcription with word-level timestamps (via `faster-whisper`).
-- Scene detection through PySceneDetect with optional BLIP captioning of keyframes.
-- Merge step that aligns audio segments with visual shots and writes a JSON bundle
-  plus per-modality indexes for downstream tooling.
-- CLI wrapper to run the full workflow on local media.
+Built with **LangGraph**, **faster-whisper**, **PySceneDetect**, **BLIP**, **SentenceTransformers**, **SQLite FTS5** and **OpenTimelineIO**.
 
-### Installation
+---
 
-Use [uv](https://github.com/astral-sh/uv) or pip/venv to install dependencies:
+## How it works
+
+The project is split into two LangGraph graphs: an **offline analysis pipeline** that turns raw footage into structured, searchable data, and a **conversational agent** that edits a timeline with tools.
+
+```mermaid
+flowchart LR
+    subgraph A["1 · Analysis pipeline (LangGraph StateGraph)"]
+        direction LR
+        R[/"Raw rushes<br/>(.mp4, .mov, .mkv…)"/] --> I[ingest]
+        I --> AU["audio_analysis<br/>faster-whisper<br/>word-level timestamps"]
+        AU --> V["video_analysis<br/>PySceneDetect shots<br/>+ BLIP keyframe captions"]
+        V --> M["merge<br/>align transcript ↔ shots"]
+        M --> B[("analysis_bundle.json")]
+    end
+
+    subgraph S["2 · Media store"]
+        B --> DB[("SQLite<br/>FTS5 keyword index<br/>+ semantic search")]
+    end
+
+    subgraph G["3 · Editing agent (LangGraph + tools)"]
+        U(["🧑 You"]) <--> AG{{"LLM agent"}}
+        AG -- search --> DB
+        AG -- edit --> T[("timeline.otio")]
+        T -- render --> P[/"preview.mp4<br/>(ffmpeg)"/]
+    end
+```
+
+1. **Ingest** finds every video file in the input folder.
+2. **Audio analysis** transcribes each rush with faster-whisper (voice-activity filtering, word-level timestamps).
+3. **Video analysis** detects shot boundaries with PySceneDetect, extracts a keyframe per shot and (optionally) captions it with BLIP.
+4. **Merge** aligns transcript segments with the shots they overlap, producing "timeline atoms": one shot, its timecodes, what is said and what is seen.
+5. **Media store** loads the bundle into SQLite, with an FTS5 index for exact keyword queries and SentenceTransformer embeddings (`all-mpnet-base-v2`) for semantic search over the transcript.
+6. **Editing agent** is a tool-calling LLM agent that combines search and timeline tools to answer requests and build the edit. It always answers with shot IDs and timecodes.
+
+## Agent tools
+
+| Tool | What it does |
+|---|---|
+| `semantic_clip_search` | Finds shots whose transcript matches a natural-language query (cosine similarity on embeddings). |
+| `keyword_clip_search` | Exact search with SQLite FTS5 syntax (`AND`, `OR`, `NEAR`…). |
+| `list_analyzed_shots` | Browses the shot catalog, optionally filtered by asset. |
+| `lookup_segment_context` | Maps a transcript segment back to its shot and timecodes. |
+| `initialize_timeline` | Creates (or resets) an empty OTIO timeline. |
+| `insert_shot_into_timeline` | Places a shot at a given time, or appends it to the end. |
+| `cut_timeline_clip` | Splits the clip under a given timestamp. |
+| `describe_timeline` | Returns the current edit: clips, order and timecodes. |
+| `render_timeline_preview` | Renders the timeline to MP4 with ffmpeg: rescales and pads to the largest source resolution, and falls back to silent output if a rush has no audio. |
+
+All timeline edits are non-destructive: the source files are never touched, and the resulting `.otio` file can be opened in other OTIO-compatible tools or converted to EDL.
+
+## Getting started
+
+### Prerequisites
+
+- Python 3.12 and [uv](https://github.com/astral-sh/uv) (or pip)
+- `ffmpeg` and `ffprobe` on your `PATH`
+- An **OpenAI** or **Azure OpenAI** API key
+- Optional: a LangSmith API key for tracing
+
+### Install
 
 ```bash
+git clone https://github.com/OdakK/video_editor_agent.git
+cd video_editor_agent
 uv sync
-# or
-python -m venv .venv && source .venv/bin/activate
-pip install -e .
+cp .env.example .env   # then fill in your API keys
 ```
 
-> **Note**  
-> Captioning and transcription models are resource intensive. Running on CPU works
-> but will be slower than GPU/Metal backends. Adjust `AudioAnalyzer` and
-> `VideoAnalyzer` parameters if you have a preferred device.
-
-### Running the Workflow
-
-1. Place your rushes inside a directory (e.g. `./rushes`).
-2. Execute the workflow:
+### 1. Analyze your rushes
 
 ```bash
-python main.py --input-dir ./rushes --output-dir ./analysis-output
+python main.py --input-dir ./input_rushed --output-dir ./output
 ```
 
-Generated artifacts:
-- `analysis_bundle.json` – merged timeline atoms.
-- `audio_index.json` – transcript segments grouped by asset.
-- `video_index.json` – scene metadata (shots, keyframes, captions).
-- `keyframes/` – extracted JPEG previews for each detected shot.
+This writes to `./output`:
 
-Customize detector thresholds or model sizes by constructing
-`AudioAnalyzer`/`VideoAnalyzer` instances and passing them into
-`create_analysis_workflow` before compiling:
+- `analysis_bundle.json`: the merged timeline atoms
+- `audio_index.json`: transcript segments per asset
+- `video_index.json`: shots, keyframes and captions per asset
+- `keyframes/`: one JPEG preview per detected shot
 
-```python
-from workflows.analysis import build_analysis_workflow
-from media_analysis.audio import AudioAnalyzer
-from media_analysis.video import VideoAnalyzer
+> Whisper and BLIP are heavy. CPU works but is slow; a GPU or Apple Silicon helps a lot. You can tune the models and thresholds:
+>
+> ```python
+> from workflows.analysis import build_analysis_workflow
+> from media_analysis.audio import AudioAnalyzer
+> from media_analysis.video import VideoAnalyzer
+>
+> workflow = build_analysis_workflow(
+>     audio_analyzer=AudioAnalyzer(model_size="large-v3"),
+>     video_analyzer=VideoAnalyzer(threshold=28.0, enable_captions=False),
+> ).compile()
+> workflow.invoke({"input_dir": "./rushes", "output_dir": "./output"})
+> ```
 
-workflow = build_analysis_workflow(
-    audio_analyzer=AudioAnalyzer(model_size="large-v3"),
-    video_analyzer=VideoAnalyzer(threshold=28.0, enable_captions=False),
-).compile()
-workflow.invoke({"input_dir": "./rushes", "output_dir": "./analysis-output"})
+### 2. Talk to the editor
+
+```bash
+langgraph dev --allow-blocking
 ```
 
-### Next Steps
-- Plug the exported bundle into a retrieval/indexing layer for the conversational
-  editing agent.
-- Extend `VideoAnalyzer` with object/face detection to populate semantic tags.
-- Add diarization in the audio branch for speaker-aware editing operations.
+This starts the LangGraph dev server with LangGraph Studio, where you can chat with the `agent` graph and watch every tool call. With `LANGSMITH_API_KEY` set, runs are also traced in LangSmith.
 
-## Media Store
+Try requests like:
 
-The `media_store` package converts the analysis artifacts into a queryable SQLite
-database enriched with text embeddings.
+- *"List all the shots from the first rush."*
+- *"Find where someone says 'ciel bleu' and add that shot to the timeline."*
+- *"Cut the clip at 12.5 seconds and describe the timeline."*
+- *"Render a preview to preview.mp4."*
 
-### Building the Store
+## Project structure
 
-```python
-from pathlib import Path
-from media_store import MediaStore, load_analysis_bundle
-
-bundle = load_analysis_bundle(Path("analysis-output/analysis_bundle.json"))
-store = MediaStore("media_store.db")
-store.initialize(drop_existing=True)
-store.ingest_bundle(bundle)
+```
+src/
+├── workflows/
+│   ├── analysis.py       # LangGraph analysis pipeline: ingest → audio → video → merge
+│   └── agent.py          # Editing agent: LLM + tools, exposed to `langgraph dev`
+├── media_analysis/
+│   ├── ingest.py         # Media discovery
+│   ├── audio.py          # faster-whisper transcription
+│   ├── video.py          # PySceneDetect shots, keyframes, BLIP captions
+│   ├── merge.py          # Transcript ↔ shot alignment
+│   └── schemas.py        # Pydantic models (MediaAsset, SceneSegment, TimelineAtom…)
+├── media_store/
+│   └── store.py          # SQLite schema, FTS5 and semantic search
+├── timeline/
+│   └── manager.py        # OTIO editing and ffmpeg rendering
+└── tools/
+    ├── media_tools.py    # Search tools for the agent
+    └── timeline_tools.py # Editing tools for the agent
+main.py                   # CLI for the analysis pipeline
+langgraph.json            # Graph definitions for `langgraph dev`
 ```
 
-This creates:
-- `media_asset`, `scene_segment`, `transcript_segment`, and `timeline_atom` tables.
-- An FTS index for transcript keyword search.
-- Embeddings (SentenceTransformers) enabling semantic queries.
+## Design choices
 
-### Query Examples
+- **Two graphs, not one.** Analysis is slow and deterministic, and it runs once per batch of rushes. Editing is fast, interactive and LLM-driven. Keeping them separate means you never re-transcribe footage to try a new edit.
+- **Timeline atoms as the shared language.** Each shot carries its timecodes, overlapping transcript and captions, so the agent reasons about *shots* instead of raw frames or audio.
+- **Keyword and semantic search.** FTS5 handles exact words and names; embeddings handle "the part where they talk about the weather". The agent picks the right tool for the request.
+- **OTIO as the output format.** It's an open, non-destructive timeline format, so the rough cut isn't locked into this tool.
 
-```python
-# Semantic search on transcript content
-results = store.semantic_search("parle du ciel bleu", limit=3)
-for r in results:
-    print(r.asset_id, r.shot_id, r.start, r.end, r.score, r.text_snippet)
+## Limitations and roadmap
 
-# Exact keyword search (SQLite FTS)
-fts_results = store.full_text_search("ciel AND bleu", limit=5)
-```
+This is a working prototype, not a finished editor.
 
-These APIs will feed the future editing agent, which can retrieve relevant shots
-based on natural-language requests. Further extensions may store embeddings for
-captions/tags or expose a REST service for external consumers.
+- Semantic search currently embeds the transcript on each query. Caching the embeddings in the store (or using a vector index) is the next step for large libraries.
+- Captions and tags are stored but not yet included in semantic search.
+- Previews render one track at a time; there are no transitions, titles or audio mixing yet.
+- Next ideas: speaker diarization for speaker-aware edits, object and face detection for visual tags, and captions in the semantic index.
 
+## License
 
-## Agent Tools (LangGraph)
-
-When `langgraph dev --allow-blocking` is running, the editor agent can call the
-following structured tools:
-
-- `list_analyzed_shots` – enumerate every detected plan with asset/timecodes.
-- `semantic_clip_search` – vector search over transcripts for fuzzy matches.
-- `keyword_clip_search` – SQLite FTS queries (supports `AND`, `OR`, `NEAR`, ...).
-- `lookup_segment_context` – map a transcript segment ID back to its shot/timecodes.
-- Timeline-specific tools (`initialize_timeline`, `insert_shot_into_timeline`,
-  `cut_timeline_clip`, `describe_timeline`, `render_timeline_preview`) described
-  in the next section.
-
-These cover the current “minimum viable editor”: browsing rushes, picking clips,
-inserting them, cutting, and producing a preview render.
-
-
-## Timeline Editing (OTIO)
-
-The conversational agent can now manipulate an OpenTimelineIO timeline to sketch
-rough edits directly from rush analysis results.
-
-- The default timeline file is `timeline.otio` (override via `TIMELINE_PATH`).
-- Available tools:
-  - `initialize_timeline` – reset/create an empty timeline.
-  - `insert_shot_into_timeline` – place a shot at a given time or append to the end.
-  - `cut_timeline_clip` – split the clip that spans the requested timestamp.
-  - `describe_timeline` – inspect the current sequence with clip/time metadata.
-  - `render_timeline_preview` – render the current sequence to MP4 via ffmpeg.
-- All edits are non-destructive OTIO operations; the resulting file can later be
-  converted into EDL, OTIO JSON, or FFmpeg concat scripts for preview/export.
-  Rendering automatically scales/pads shots to the largest source resolution and
-  falls back to silent output if some rushes lack audio.
-
-> **Prerequisite**  
-> Install `ffmpeg`/`ffprobe` on your system to enable the render tool.
+No license has been chosen yet. Contact me if you'd like to reuse the code.
