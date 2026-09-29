@@ -63,7 +63,6 @@ def create_media_query_agent(
     *,
     db_path: Optional[Path | str] = DEFAULT_DB_PATH,
     timeline_path: Path | str = DEFAULT_TIMELINE_PATH,
-    verbose: bool = False,
 ):
     """Create an agent capable of answering questions about analyzed rushes."""
     bundle_path = Path(bundle_path).expanduser().resolve()
@@ -127,21 +126,18 @@ def main() -> None:
         default=str(DEFAULT_TIMELINE_PATH),
         help="Path to the OTIO timeline file used for editing operations.",
     )
-    parser.add_argument(
-        "--verbose",
-        action="store_true",
-        help="Enable verbose LangChain logging.",
-    )
     args = parser.parse_args()
 
     agent_executor = create_media_query_agent(
         bundle_path=args.bundle_path,
         db_path=args.db_path,
         timeline_path=args.timeline_path,
-        verbose=args.verbose,
     )
 
     print("Agent prêt. Tape 'exit' pour quitter.")
+    # create_agent works on a message list: keep the history so follow-up requests
+    # ("coupe-le à 3s") can refer to earlier turns.
+    messages: list = []
     try:
         while True:
             try:
@@ -153,18 +149,18 @@ def main() -> None:
             if query.lower() in {"exit", "quit"}:
                 break
 
-            result = agent_executor.invoke({"input": query})
-            output = result.get("output") if isinstance(result, dict) else result
-            print(output)
+            messages.append({"role": "user", "content": query})
+            result = agent_executor.invoke({"messages": messages})
+            messages = result["messages"]
+            print(messages[-1].content)
     except KeyboardInterrupt:
         pass
 
 
-try:
-    agent = build_default_agent()
-except Exception:
-    agent = None
-
-
 if __name__ == "__main__":
     main()
+else:
+    # Graph exposed to `langgraph dev` (see langgraph.json). Built only on import so the
+    # CLI can use its own paths, and left to raise so a missing bundle or missing
+    # credentials show up as a clear error instead of an empty graph.
+    agent = build_default_agent()
