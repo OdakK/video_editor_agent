@@ -23,6 +23,7 @@ SYSTEM_PROMPT = """You are an assistant video editor working on analyzed rushes.
 - Always give shot ids and timecodes (in seconds) in your answers.
 - After editing, check the result with describe_timeline before you report it.
 - If what the user asks for is not in the rushes, say so instead of picking a random shot.
+- Give file paths as plain text, not as links.
 - Answer in the user's language."""
 
 
@@ -50,8 +51,13 @@ def create_editing_agent(bundle_path: Path | None = None, db_path: Path | None =
             raise FileNotFoundError(f"{bundle_path} not found: run `video-agent analyze` first.")
         store = MediaStore(db_path or paths["db"])
         store.ingest_bundle(load_analysis_bundle(bundle_path))
-    timeline = TimelineManager(timeline_path or paths["timeline"])
-    return create_agent(model=model or load_model(), tools=build_tools(store, timeline),
+    return build_agent(store, TimelineManager(timeline_path or paths["timeline"]), model)
+
+
+def build_agent(store: MediaStore, timeline: TimelineManager, model: BaseChatModel | None = None):
+    """The agent over an existing store and timeline. Renders go next to the timeline file."""
+    return create_agent(model=model or load_model(),
+                        tools=build_tools(store, timeline, output_dir=timeline.timeline_path.parent),
                         system_prompt=SYSTEM_PROMPT)
 
 

@@ -49,6 +49,16 @@ def test_remove_and_move(timeline, store):
         timeline.remove_clip("missing")
 
 
+def test_parallel_edits_are_not_lost(timeline, store):
+    """Agents call tools in parallel: concurrent inserts on the same file must all land."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    shot = store.get_shot("beach_shot_000")
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        list(pool.map(lambda _: timeline.insert_shot(shot), range(16)))
+    assert len(timeline.describe()) == 16
+
+
 def test_timeline_is_saved_as_otio(timeline, store):
     timeline.insert_shot(store.get_shot("beach_shot_000"))
     reloaded = TimelineManager(timeline.timeline_path)

@@ -10,6 +10,10 @@ The agent searches your rushes by meaning or by keyword, places shots on an [Ope
 
 Built with **LangGraph**, **faster-whisper**, **PySceneDetect**, **BLIP**, **SentenceTransformers**, **SQLite FTS5** and **OpenTimelineIO**.
 
+![The web UI: shot library, preview player, timeline and the agent's chat](docs/ui.jpg)
+
+*The web UI on the demo footage (synthetic test patterns): one request, and the agent searched the shots, built the timeline and rendered the preview.*
+
 ---
 
 ## How it works
@@ -93,7 +97,22 @@ This writes `output/analysis_bundle.json` and one JPEG keyframe per shot in `out
 
 > Whisper and BLIP are heavy: CPU works but is slow, a GPU or Apple Silicon helps a lot.
 
-### 2. Talk to the editor
+### 2. Edit in the web UI
+
+```bash
+uv sync --extra analysis --extra ui
+uv run video-agent ui              # opens http://127.0.0.1:8000
+```
+
+Shot library on the left, preview and timeline in the middle, the agent on the right. You can edit by hand
+(add, move, remove clips, render) or ask the agent, and watch each tool call stream in while it works.
+Manual and agent edits go through the same timeline code.
+
+**No rushes at hand?** `uv run video-agent ui --demo` generates three synthetic rushes with ffmpeg
+(test patterns and tones, with a hand-written transcript and captions) and opens them. It needs no
+ML model, only ffmpeg and an API key for the LLM.
+
+### 3. Or talk to the editor in the terminal
 
 ```bash
 uv run video-agent chat -v      # -v prints every tool call
@@ -119,7 +138,7 @@ Try requests like:
 uv sync && uv run pytest -v
 ```
 
-The tests run in a few seconds, without models or API keys: the analysis output is a small hand-made bundle and the sentence encoder is replaced by a deterministic bag-of-words hash. They cover the transcript ↔ shot alignment, keyword and semantic search (including the embedding cache), every timeline operation, the ffmpeg command, the agent loop with a scripted model, and an **end-to-end render**: two test clips are generated with ffmpeg, edited, rendered, and the output duration and resolution are checked. CI runs them on every push.
+The tests run in a few seconds, without models or API keys: the analysis output is a small hand-made bundle and the sentence encoder is replaced by a deterministic bag-of-words hash. They cover the transcript ↔ shot alignment, keyword and semantic search (including the embedding cache), every timeline operation, **concurrent edits** (agents call tools in parallel), the ffmpeg command, the agent loop and the web UI's API with a scripted model, and an **end-to-end render**: two test clips are generated with ffmpeg, edited, rendered, and the output duration and resolution are checked. CI runs them on every push.
 
 ## Project structure
 
@@ -137,7 +156,9 @@ src/video_agent/
 ├── timeline.py       # OTIO editing and ffmpeg rendering
 ├── tools.py          # The agent's tools
 ├── agent.py          # Editing agent (also exposed to `langgraph dev`)
-└── cli.py            # video-agent analyze | chat
+├── ui/               # FastAPI server + static page (no build step), chat streamed as SSE
+├── demo.py           # Synthetic demo rushes
+└── cli.py            # video-agent analyze | chat | ui
 tests/                # Fast tests, no model or API key needed
 ```
 
@@ -147,6 +168,7 @@ tests/                # Fast tests, no model or API key needed
 - **Timeline atoms as the shared language.** Each shot carries its timecodes, overlapping transcript and captions, so the agent reasons about *shots* instead of raw frames or audio.
 - **Keyword and semantic search, over speech and image.** FTS5 handles exact words and names; embeddings handle "the part where they talk about the weather". Both include the BLIP captions, so "the wide shot of the beach" works even when nobody speaks.
 - **Heavy models are optional dependencies, loaded lazily.** The store, timeline and agent install and test without PyTorch, which keeps CI fast.
+- **One lock per timeline file.** Models call tools in parallel (three `insert_shot` at once is common), and each edit is a load → modify → save cycle on the `.otio` file. Without the lock, parallel inserts overwrote each other: this was caught in a real session with the UI, and a test now covers it.
 - **OTIO as the output format.** It's an open, non-destructive timeline format, so the rough cut isn't locked into this tool.
 
 ## Limitations and roadmap

@@ -21,3 +21,4 @@ media_store.db
 # Local config
 .env
 .langgraph_api/
+demo/

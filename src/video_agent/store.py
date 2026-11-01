@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import sqlite3
@@ -84,6 +85,26 @@ class SentenceTransformerEncoder:
                 raise ImportError("Semantic search needs the analysis extra: uv sync --extra analysis") from exc
             self._model = SentenceTransformer(self.model)
         return self._model.encode(list(texts), convert_to_numpy=True)
+
+
+class HashingEncoder:
+    """Lightweight bag-of-words encoder: no model download, used by the demo and the tests.
+
+    Texts that share words get a high cosine similarity. It does not understand meaning,
+    so use the default SentenceTransformerEncoder for real footage.
+    """
+
+    def __init__(self, dim: int = 512) -> None:
+        self.dim = dim
+        self.calls = 0
+
+    def encode(self, texts: Sequence[str]) -> np.ndarray:
+        self.calls += 1
+        vectors = np.zeros((len(texts), self.dim), dtype=np.float32)
+        for row, text in enumerate(texts):
+            for word in re.findall(r"\w+", text.lower()):
+                vectors[row, int(hashlib.md5(word.encode()).hexdigest(), 16) % self.dim] += 1
+        return vectors
 
 
 @dataclass
@@ -224,7 +245,7 @@ class MediaStore:
     # ------------------------------------------------------------------ lookups
 
     def list_shots(self, asset_id: str | None = None, limit: int | None = None) -> list[dict]:
-        sql = "SELECT shot_id, asset_id, start, end, transcript, captions FROM shot"
+        sql = "SELECT shot_id, asset_id, start, end, keyframe_path, transcript, captions FROM shot"
         params: list = []
         if asset_id:
             sql += " WHERE asset_id = ?"

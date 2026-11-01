@@ -2,6 +2,7 @@
 
     video-agent analyze --input-dir rushes/     # transcribe, detect shots, caption keyframes
     video-agent chat                            # talk to the editing agent
+    video-agent ui [--demo]                     # web UI: shots, timeline, preview and chat
 """
 
 from __future__ import annotations
@@ -52,6 +53,35 @@ def chat(args: argparse.Namespace) -> None:
         print(f"\nagent> {messages[-1].content}")
 
 
+def ui(args: argparse.Namespace) -> None:
+    import uvicorn
+    from dotenv import load_dotenv
+
+    from .store import HashingEncoder, MediaStore, load_analysis_bundle
+    from .timeline import TimelineManager
+    from .ui.server import Session, create_app, model_name
+
+    load_dotenv()
+    if args.demo:
+        from .demo import build_demo
+
+        print("Building the demo footage with ffmpeg…")
+        bundle_path = build_demo(args.demo_dir)
+        encoder = HashingEncoder()  # the demo runs without downloading an embedding model
+    else:
+        bundle_path = args.bundle or Path("output/analysis_bundle.json")
+        if not bundle_path.exists():
+            raise SystemExit(f"{bundle_path} not found: run `video-agent analyze` first, "
+                             "or try `video-agent ui --demo`.")
+        encoder = None
+    workdir = bundle_path.parent
+    store = MediaStore(workdir / "media_store.db", encoder=encoder)
+    store.ingest_bundle(load_analysis_bundle(bundle_path))
+    session = Session(store, TimelineManager(workdir / "timeline.otio"), model_name())
+    print(f"Video Editor Agent UI: http://{args.host}:{args.port}")
+    uvicorn.run(create_app(session), host=args.host, port=args.port, log_level="warning")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="video-agent", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -72,6 +102,14 @@ def main() -> None:
     p.add_argument("--timeline", type=Path, default=None, help=".otio file to edit")
     p.add_argument("-v", "--verbose", action="store_true", help="print tool calls")
     p.set_defaults(func=chat)
+
+    p = sub.add_parser("ui", help="open the web UI")
+    p.add_argument("--bundle", type=Path, default=None, help="analysis_bundle.json (default: output/)")
+    p.add_argument("--demo", action="store_true", help="generate synthetic demo rushes and open them")
+    p.add_argument("--demo-dir", type=Path, default=Path("demo"))
+    p.add_argument("--host", default="127.0.0.1")
+    p.add_argument("--port", type=int, default=8000)
+    p.set_defaults(func=ui)
 
     args = parser.parse_args()
     logging.basicConfig(level=getattr(logging, args.log_level.upper(), logging.INFO),

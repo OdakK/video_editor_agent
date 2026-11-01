@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import functools
+from pathlib import Path
 
 from langchain_core.tools import BaseTool, ToolException, tool
 
@@ -22,7 +23,9 @@ def _recoverable(func):
     return wrapper
 
 
-def build_tools(store: MediaStore, timeline: TimelineManager) -> list[BaseTool]:
+def build_tools(store: MediaStore, timeline: TimelineManager, output_dir: Path | str = "output") -> list[BaseTool]:
+    output_dir = Path(output_dir)
+
     @tool
     @_recoverable
     def semantic_search(query: str, limit: int = 5) -> list[dict]:
@@ -90,10 +93,9 @@ def build_tools(store: MediaStore, timeline: TimelineManager) -> list[BaseTool]:
 
     @tool
     @_recoverable
-    def render_preview(output_path: str = "preview.mp4", include_audio: bool = True,
-                       track: str = DEFAULT_TRACK) -> dict:
-        """Render the timeline to an MP4 file with ffmpeg."""
-        return timeline.render_preview(output_path, track, include_audio)
+    def render_preview(file_name: str = "preview.mp4", include_audio: bool = True, track: str = DEFAULT_TRACK) -> dict:
+        """Render the timeline to an MP4 file with ffmpeg, in the output folder."""
+        return timeline.render_preview(output_dir / Path(file_name).name, track, include_audio)
 
     tools = [semantic_search, keyword_search, list_shots, shots_for_segment, initialize_timeline,
              insert_shot, split_clip, remove_clip, move_clip, describe_timeline, render_preview]

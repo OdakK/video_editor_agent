@@ -5,7 +5,9 @@ from __future__ import annotations
 import copy
 import shlex
 import subprocess
+import threading
 import uuid
+from functools import wraps
 from pathlib import Path
 from typing import Any
 
@@ -14,6 +16,22 @@ import opentimelineio as otio
 from .probe import probe
 
 DEFAULT_TRACK = "Video"
+
+# One lock per timeline file: agents call tools in parallel (e.g. three insert_shot at once), and each
+# edit is a load -> modify -> save cycle on the same .otio file, so concurrent edits would overwrite
+# each other.
+_locks: dict[Path, threading.RLock] = {}
+_locks_guard = threading.Lock()
+
+
+def _serialized(method):
+    @wraps(method)
+    def wrapper(self, *args, **kwargs):
+        with _locks_guard:
+            lock = _locks.setdefault(self.timeline_path, threading.RLock())
+        with lock:
+            return method(self, *args, **kwargs)
+    return wrapper
 
 
 class TimelineManager:
@@ -25,12 +43,14 @@ class TimelineManager:
 
     # ------------------------------------------------------------------ editing
 
+    @_serialized
     def initialize(self, name: str | None = None) -> list[dict[str, Any]]:
         """Create an empty timeline, replacing the current one."""
         timeline = self._empty_timeline(name or self.default_name)
         self._save(timeline)
         return self._summary(self._track(timeline))
 
+    @_serialized
     def insert_shot(self, shot: dict[str, Any], timeline_time: float | None = None,
                     track_name: str = DEFAULT_TRACK) -> list[dict[str, Any]]:
         """Insert a shot before the clip playing at `timeline_time`, or at the end."""
@@ -40,6 +60,7 @@ class TimelineManager:
         self._save(timeline)
         return self._summary(track)
 
+    @_serialized
     def split_at(self, timeline_time: float, track_name: str = DEFAULT_TRACK) -> list[dict[str, Any]]:
         """Cut the clip playing at `timeline_time` into two clips."""
         timeline = self._load()
@@ -51,6 +72,7 @@ class TimelineManager:
                 return self._summary(track)
         raise ValueError(f"No clip is playing at {timeline_time:.2f}s on track {track_name}.")
 
+    @_serialized
     def remove_clip(self, clip_id: str, track_name: str = DEFAULT_TRACK) -> list[dict[str, Any]]:
         timeline = self._load()
         track = self._track(timeline, track_name)
@@ -58,6 +80,7 @@ class TimelineManager:
         self._save(timeline)
         return self._summary(track)
 
+    @_serialized
     def move_clip(self, clip_id: str, new_index: int, track_name: str = DEFAULT_TRACK) -> list[dict[str, Any]]:
         """Move a clip to a new position (0 = first) in the track."""
         timeline = self._load()
@@ -69,11 +92,13 @@ class TimelineManager:
         self._save(timeline)
         return self._summary(track)
 
+    @_serialized
     def describe(self, track_name: str = DEFAULT_TRACK) -> list[dict[str, Any]]:
         return self._summary(self._track(self._load(), track_name))
 
     # ------------------------------------------------------------------ rendering
 
+    @_serialized
     def render_preview(self, output_path: Path | str, track_name: str = DEFAULT_TRACK,
                        include_audio: bool = True, ffmpeg: str = "ffmpeg") -> dict[str, Any]:
         """Render the track to MP4. Audio is dropped if any source has no audio track."""
