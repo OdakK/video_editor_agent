@@ -57,3 +57,20 @@ def probe(path: str | Path) -> MediaInfo:
     except subprocess.CalledProcessError as exc:
         raise RuntimeError(f"ffprobe could not read {path}: {exc.stderr.strip()}") from exc
     return parse_ffprobe(result.stdout)
+
+
+def extract_frame(path: str | Path, timestamp: float, output: Path, width: int = 480,
+                  quality: int | None = None) -> bool:
+    """Save the frame at `timestamp` as a JPEG. Proxies of 360 files only keep one frame every
+    2 seconds, so when nothing is left after the timestamp, fall back to the last frame before it."""
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.unlink(missing_ok=True)  # a stale file would hide a failed extraction
+    extra = ["-q:v", str(quality)] if quality else []
+    for args in (["-ss", f"{timestamp:.2f}", "-i", str(path)],                      # frame at or after t
+                 ["-sseof", "-2.5", "-i", str(path)],                               # last frames of the file
+                 ["-i", str(path)]):                                                # first frame
+        subprocess.run(["ffmpeg", "-y", "-v", "error", *args, "-frames:v", "1", "-vf", f"scale={width}:-2", *extra,
+                        str(output)], capture_output=True)
+        if output.exists() and output.stat().st_size > 0:
+            return True
+    return False

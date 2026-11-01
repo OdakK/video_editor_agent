@@ -29,7 +29,8 @@ CREATE TABLE IF NOT EXISTS media_asset (
     path TEXT NOT NULL,
     duration REAL,
     fps REAL,
-    has_audio INTEGER NOT NULL DEFAULT 1
+    has_audio INTEGER NOT NULL DEFAULT 1,
+    source360 TEXT              -- full-quality 360 original of a proxy view, as JSON
 );
 CREATE TABLE IF NOT EXISTS shot (
     shot_id TEXT PRIMARY KEY,
@@ -137,10 +138,10 @@ class MediaStore:
         with self._connect() as con:
             con.executescript(SCHEMA)
             # Databases created before the vision descriptions lack these columns.
-            columns = {row["name"] for row in con.execute("PRAGMA table_info(shot)")}
-            for column, ddl in (("tags", "TEXT NOT NULL DEFAULT '[]'"), ("description", "TEXT")):
-                if column not in columns:
-                    con.execute(f"ALTER TABLE shot ADD COLUMN {column} {ddl}")
+            for table, column, ddl in (("shot", "tags", "TEXT NOT NULL DEFAULT '[]'"), ("shot", "description", "TEXT"),
+                                       ("media_asset", "source360", "TEXT")):
+                if column not in {row["name"] for row in con.execute(f"PRAGMA table_info({table})")}:
+                    con.execute(f"ALTER TABLE {table} ADD COLUMN {column} {ddl}")
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -164,8 +165,10 @@ class MediaStore:
                           "shot", "media_asset"):
                 con.execute(f"DELETE FROM {table}")
 
-            con.executemany("INSERT INTO media_asset VALUES (?, ?, ?, ?, ?)", [
-                (a.asset_id, str(a.path), a.duration, a.fps, int(a.has_audio)) for a in bundle.media_assets])
+            con.executemany("INSERT INTO media_asset (asset_id, path, duration, fps, has_audio, source360) "
+                            "VALUES (?, ?, ?, ?, ?, ?)", [
+                (a.asset_id, str(a.path), a.duration, a.fps, int(a.has_audio),
+                 a.source360.model_dump_json() if a.source360 else None) for a in bundle.media_assets])
             con.executemany("INSERT INTO transcript_segment VALUES (?, ?, ?, ?, ?)", [
                 (s.segment_id, audio.asset_id, s.start, s.end, s.text)
                 for audio in bundle.audio_index.values() for s in audio.segments])
@@ -287,12 +290,14 @@ class MediaStore:
         """A shot with the metadata of its source file, as needed to place it on a timeline."""
         with self._connect() as con:
             row = con.execute("""
-                SELECT s.*, m.path AS asset_path, m.duration AS asset_duration, m.fps, m.has_audio
+                SELECT s.*, m.path AS asset_path, m.duration AS asset_duration, m.fps, m.has_audio, m.source360
                 FROM shot s JOIN media_asset m ON m.asset_id = s.asset_id WHERE s.shot_id = ?
             """, (shot_id,)).fetchone()
         if row is None:
             return None
-        return {**_decode(row), "has_audio": bool(row["has_audio"])}
+        shot = {**_decode(row), "has_audio": bool(row["has_audio"])}
+        shot["source360"] = json.loads(row["source360"]) if row["source360"] else None
+        return shot
 
     def transcript_segments(self, shot_id: str) -> list[dict]:
         """Speech in a shot, sentence by sentence, with timecodes: where it is safe to cut."""

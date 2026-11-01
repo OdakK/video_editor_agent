@@ -12,7 +12,6 @@ import base64
 import logging
 import math
 import os
-import subprocess
 import tempfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -21,6 +20,7 @@ from typing import Literal
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
+from ..probe import extract_frame
 from ..schemas import MediaAsset, SceneSegment, ShotDescription
 
 LOGGER = logging.getLogger(__name__)
@@ -71,7 +71,7 @@ class VisionDescriber:
             self._model = init_chat_model(name, temperature=0, max_retries=6)
         return self._model.with_structured_output(_Description)
 
-    def describe(self, asset: MediaAsset, scene: SceneSegment, window: float = 20.0) -> ShotDescription:
+    def describe(self, asset: MediaAsset, scene: SceneSegment, window: float = 30.0) -> ShotDescription:
         """Describe a shot. Long shots (a 10-minute walk filmed in one take) are described window by
         window, in parallel, so the moments stay precise all along the shot."""
         if scene.end - scene.start <= window * 1.5:
@@ -80,7 +80,7 @@ class VisionDescriber:
         edges = [scene.start + i * window for i in range(count)] + [scene.end]
         if len(edges) > 2 and edges[-1] - edges[-2] < window / 2:  # merge a short tail into the previous window
             edges.pop(-2)
-        with ThreadPoolExecutor(max_workers=4) as pool:
+        with ThreadPoolExecutor(max_workers=3) as pool:  # stays under typical API rate limits
             parts = list(pool.map(lambda w: self._describe_window(asset, *w), zip(edges, edges[1:], strict=False)))
         first = parts[0]
         return ShotDescription(
@@ -97,10 +97,7 @@ class VisionDescriber:
         with tempfile.TemporaryDirectory() as tmp:
             for i, t in enumerate(times):
                 frame = Path(tmp) / f"{i}.jpg"
-                subprocess.run(["ffmpeg", "-y", "-v", "error", "-ss", f"{t:.2f}", "-i", str(asset.path),
-                                "-frames:v", "1", "-vf", f"scale={self.frame_width}:-2", "-q:v", "4", str(frame)],
-                               check=True, capture_output=True)
-                if not frame.exists():
+                if not extract_frame(asset.path, t, frame, self.frame_width, quality=4):
                     continue
                 data = base64.b64encode(frame.read_bytes()).decode()
                 content.append({"type": "text", "text": f"t = {t:.1f}s"})

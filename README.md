@@ -122,15 +122,28 @@ have not analyzed anything yet. Without the `analysis` extra, imports fall back 
 shot per file, with a keyframe but no transcript. Imports use Whisper `small` by default, for a
 reasonable wait (`--whisper-model` to change it).
 
-**360° cameras (Insta360 `.insv`)**: a `.insv` file holds the two fisheye lenses of the camera. On import,
-each lens is re-projected on its own into a flat vertical 1080×1920 video with ffmpeg's `v360` filter (no
-stitching, so no seam), giving two synchronized rushes per clip: `<clip>_lens1` and `<clip>_lens2`, usually
-the scene in front and a selfie of the person filming. The agent treats them as a two-camera shoot and cuts
-between them while keeping time moving forward; `build_timeline` flags any clip that replays seconds already
-shown from the other lens. The soundtrack is transcribed once for both views. On a Mac, HEVC decoding uses
-VideoToolbox: about 3× faster, 6 s for 12 s of 8K footage. Use *Import from a folder* for these files: they
-are read in place instead of being uploaded (a 10-minute clip weighs about 9 GB), and `.lrv` proxies are
-skipped. Not handled yet: Insta360's gyro stabilization and free reframing (any yaw/pitch) during the edit.
+**360° cameras (Insta360 `.insv`)**: a `.insv` file holds the two fisheye lenses of the camera. Each lens is
+re-projected on its own into a flat vertical view with ffmpeg's `v360` filter (no stitching, so no seam),
+giving two synchronized rushes per clip: `<clip>_lens1` and `<clip>_lens2`, usually the scene in front and a
+selfie of the person filming. The agent treats them as a two-camera shoot and cuts between them while keeping
+time moving forward; `build_timeline` flags any clip that replays seconds already shown from the other lens.
+
+It uses a **proxy workflow**, like professional editing software. Decoding 8K HEVC is the expensive part, so
+the import only decodes the keyframes (one every 2 s) into light 540×960 proxies with the untouched
+soundtrack: enough for transcription and the vision model. The final render reads the original `.insv` at
+full quality, for the seconds actually used. A 360 recording is one continuous take, so shot detection is
+skipped and the vision model splits it into moments. The soundtrack is transcribed once for both views.
+
+| 1 minute of 8K 360 footage | Time | Size per view |
+|---|---|---|
+| Decode every frame, two 1080×1920 views (first version) | 54 s | 124 MB |
+| Keyframes only, two 540×960 proxies | 0.7 s | 2.4 MB |
+| Render 7 s of edit from the original, at 1080×1920 | 7.7 s | |
+
+On real footage, a 17-minute clip is imported in about 5 minutes, most of it transcription and vision.
+Use *Import from a folder* for these files: they are read in place instead of being uploaded (a 10-minute
+clip weighs about 9 GB), and `.lrv` proxies are skipped. Not handled yet: Insta360's gyro stabilization, and
+free reframing (yaw, pitch, roll), which helmet or chest mounts need.
 
 **Delete a rush** with the bin icon on any of its shots: its shots leave the library and its clips
 leave the timeline. Only files the UI owns are deleted from disk (imported copies and keyframes);

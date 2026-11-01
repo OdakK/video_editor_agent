@@ -13,6 +13,7 @@ from typing import Any
 
 import opentimelineio as otio
 
+from .insta360 import flat_filter, hwaccel
 from .probe import probe
 
 DEFAULT_TRACK = "Video"
@@ -215,6 +216,7 @@ class TimelineManager:
             "asset_id": shot["asset_id"],
             "asset_path": str(shot["asset_path"]),
             "captions": shot.get("captions", []),
+            "source360": shot.get("source360"),  # full-quality original, used by the render
         }
         clip.media_reference = otio.schema.ExternalReference(
             target_url=str(shot["asset_path"]),
@@ -276,31 +278,57 @@ class TimelineManager:
                 "timeline_end": round(elapsed + duration, 3),
                 "source_start": round(source.start_time.to_seconds(), 3),
                 "source_end": round((source.start_time + source.duration).to_seconds(), 3),
+                "source360": _plain(meta.get("source360")),
             })
             elapsed += duration
         return summary
 
 
+def _plain(value):
+    """OTIO metadata values are C++ containers that die with their timeline: copy them to Python."""
+    if value is None or isinstance(value, str | int | float | bool):
+        return value
+    if hasattr(value, "items"):
+        return {k: _plain(v) for k, v in value.items()}
+    return [_plain(v) for v in value]
+
+
 def build_ffmpeg_command(clips: list[dict[str, Any]], output: Path, *, include_audio: bool,
                          ffmpeg: str = "ffmpeg", size: tuple[int, int] | None = None) -> list[str]:
-    """Trim each clip from its source, scale and pad to a common size, then concatenate."""
+    """Trim each clip from its source, scale and pad to a common size, then concatenate.
+
+    Clips from a 360 proxy are rendered from the original file instead, at full quality: the
+    input is opened at the clip's start (-ss/-t) so only the seconds used are decoded."""
     if size is None:
-        infos = [probe(c["asset_path"]) for c in clips]
-        size = (max((i.width or 0) for i in infos) or 1920, max((i.height or 0) for i in infos) or 1080)
+        dims = []
+        for c in clips:
+            if c.get("source360"):
+                dims.append((c["source360"]["width"], c["source360"]["height"]))
+            else:
+                info = probe(c["asset_path"])
+                dims.append((info.width or 0, info.height or 0))
+        size = (max(w for w, _ in dims) or 1920, max(h for _, h in dims) or 1080)
     width, height = size
     width, height = width - width % 2, height - height % 2  # libx264 needs even dimensions
+    fit = (f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
+           f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1")
 
     command, filters, streams = [ffmpeg, "-y"], [], []
     for i, clip in enumerate(clips):
-        command += ["-i", clip["asset_path"]]
         start, end = clip["source_start"], clip["source_end"]
-        filters.append(
-            f"[{i}:v]trim=start={start:.3f}:end={end:.3f},setpts=PTS-STARTPTS,"
-            f"scale={width}:{height}:force_original_aspect_ratio=decrease,"
-            f"pad={width}:{height}:(ow-iw)/2:(oh-ih)/2,setsar=1[v{i}]")
+        src = clip.get("source360")
+        if src:
+            command += [*hwaccel(), "-ss", f"{start:.3f}", "-t", f"{end - start:.3f}", "-i", str(src["path"])]
+            filters.append(f"{flat_filter(src['stream'], src.get('crop'), src['width'], src['height'], i)},"
+                           f"setpts=PTS-STARTPTS,{fit}[v{i}]")
+            audio = f"[{i}:a:0]asetpts=PTS-STARTPTS[a{i}]"
+        else:
+            command += ["-i", clip["asset_path"]]
+            filters.append(f"[{i}:v]trim=start={start:.3f}:end={end:.3f},setpts=PTS-STARTPTS,{fit}[v{i}]")
+            audio = f"[{i}:a]atrim=start={start:.3f}:end={end:.3f},asetpts=PTS-STARTPTS[a{i}]"
         streams.append(f"[v{i}]")
         if include_audio:
-            filters.append(f"[{i}:a]atrim=start={start:.3f}:end={end:.3f},asetpts=PTS-STARTPTS[a{i}]")
+            filters.append(audio)
             streams.append(f"[a{i}]")
     filters.append("".join(streams) + f"concat=n={len(clips)}:v=1:a={int(include_audio)}"
                    + ("[vout][aout]" if include_audio else "[vout]"))

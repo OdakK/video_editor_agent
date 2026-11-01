@@ -17,7 +17,6 @@ import importlib.util
 import itertools
 import logging
 import shutil
-import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
@@ -27,14 +26,15 @@ from typing import BinaryIO
 from .analysis.ingest import VIDEO_EXTENSIONS
 from .analysis.merge import merge_analysis
 from .analysis.vision import VisionDescriber
-from .insta360 import EXTENSIONS_360, flatten, is_360
-from .probe import probe
+from .insta360 import EXTENSIONS_360, is_360, make_proxies
+from .probe import extract_frame, probe
 from .schemas import (
     AnalysisBundle,
     AudioAnalysisResult,
     FrameCaption,
     MediaAsset,
     SceneSegment,
+    Source360,
     VideoAnalysisResult,
 )
 from .store import MediaStore, load_analysis_bundle
@@ -93,6 +93,22 @@ class Library:
             undescribed = self.vision and scenes and any(s.description is None for s in scenes.scenes)
             if (basic and self.mode == "full") or undescribed:
                 jobs.append(self.reanalyze(asset.asset_id))
+        return jobs
+
+    def resume(self) -> list[ImportJob]:
+        """Queue files left in the rushes folder by an import that was interrupted (server restart):
+        360 originals and videos that no rush points to."""
+        if not self.rushes_dir.is_dir():
+            return []
+        known = {Path(a.path).resolve() for a in self.bundle.media_assets}
+        known |= {Path(a.source360.path).resolve() for a in self.bundle.media_assets if a.source360}
+        orphans = sorted(f for f in self.rushes_dir.iterdir()
+                         if f.is_file() and f.suffix.lower() in SUPPORTED and f.resolve() not in known)
+        jobs = []
+        for f in orphans:
+            job = self._new_job(f.name)
+            self._worker.submit(self._process, job, f, False)
+            jobs.append(job)
         return jobs
 
     def reanalyze(self, asset_id: str) -> ImportJob:
@@ -171,6 +187,10 @@ class Library:
 
         if _inside(asset.path, self.rushes_dir):
             asset.path.unlink(missing_ok=True)
+        source = asset.source360.path if asset.source360 else None
+        still_used = any(a.source360 and a.source360.path == source for a in self.bundle.media_assets)
+        if source and not still_used and _inside(source, self.rushes_dir):  # uploaded 360 original
+            Path(source).unlink(missing_ok=True)
         keyframes = self.keyframes_dir / asset_id
         if _inside(keyframes, self.keyframes_dir) and keyframes.is_dir():
             shutil.rmtree(keyframes, ignore_errors=True)
@@ -195,15 +215,15 @@ class Library:
         try:
             if is_360(path):
                 minutes = (probe(path).duration or 0) / 60
-                job.step = f"Converting 360° to flat views ({minutes:.0f} min of footage)" if minutes >= 1 \
-                    else "Converting 360° to flat views"
-                views = flatten(path, self.rushes_dir, job.asset_id)
-                if owned:  # the uploaded original is no longer needed: the views are the rushes
-                    path.unlink(missing_ok=True)
+                job.step = f"Making 360° proxies ({minutes:.0f} min of footage)" if minutes >= 1 \
+                    else "Making 360° proxies"
+                # The original stays: the final render reads it at full quality.
+                views = make_proxies(path, self.rushes_dir / "proxies", job.asset_id)
                 shots, audio = 0, None
-                for i, view in enumerate(views, 1):
+                for i, (proxy, source) in enumerate(views, 1):
                     # The views share the soundtrack: transcribe it once and reuse it.
-                    n, audio = self._analyze(job, view.stem, view, prefix=f"View {i}/{len(views)}: ", audio=audio)
+                    n, audio = self._analyze(job, proxy.stem, proxy, prefix=f"View {i}/{len(views)}: ", audio=audio,
+                                             source360=source)
                     shots += n
             else:
                 shots, _ = self._analyze(job, job.asset_id, path)
@@ -213,18 +233,22 @@ class Library:
             job.status, job.step, job.error = "error", "Failed", str(exc)
 
     def _analyze(self, job: ImportJob, asset_id: str, path: Path, prefix: str = "",
-                 audio: AudioAnalysisResult | None = None) -> tuple[int, AudioAnalysisResult]:
+                 audio: AudioAnalysisResult | None = None,
+                 source360: Source360 | None = None) -> tuple[int, AudioAnalysisResult]:
         """Analyze one flat video and add it to the library. Returns its number of shots and its
-        transcript. Pass the transcript of another view of the same 360 clip to reuse it."""
+        transcript. Pass the transcript of another view of the same 360 clip to reuse it.
+
+        A 360 view is one continuous take (the camera writes a new file at every recording), so
+        shot detection is skipped: the vision model splits it into moments instead."""
         step = _Steps(job, prefix)
         step("Reading the file")
         info = probe(path)
         if not info.duration:
             raise ValueError("no video stream found")
         asset = MediaAsset(asset_id=asset_id, path=path, duration=info.duration, fps=info.fps,
-                           has_audio=info.has_audio, analysis=self.mode)
+                           has_audio=info.has_audio, analysis=self.mode, source360=source360)
         if self.mode == "full":
-            audio, video = self._full_analysis(step, asset, audio)
+            audio, video = self._full_analysis(step, asset, audio, single_take=source360 is not None)
         else:
             audio, video = self._basic_analysis(step, asset)
         if self.vision:
@@ -247,11 +271,13 @@ class Library:
             self.bundle = bundle
         return len(video.scenes), audio
 
-    def _full_analysis(self, step: _Steps, asset: MediaAsset, audio: AudioAnalysisResult | None = None):
+    def _full_analysis(self, step: _Steps, asset: MediaAsset, audio: AudioAnalysisResult | None = None,
+                       single_take: bool = False):
         from .analysis.audio import AudioAnalyzer
         from .analysis.video import VideoAnalyzer
 
-        self._audio = self._audio or AudioAnalyzer(model_size=self.whisper_model)
+        # int8 and greedy decoding: 2-4x faster on CPU, plenty for finding where to cut.
+        self._audio = self._audio or AudioAnalyzer(model_size=self.whisper_model, compute_type="int8", beam_size=1)
         self._video = self._video or VideoAnalyzer()
         if audio is not None:  # same soundtrack as another view: copy the transcript under this asset's ids
             audio = AudioAnalysisResult(asset_id=asset.asset_id, language=audio.language, segments=[
@@ -260,6 +286,9 @@ class Library:
         else:
             step("Transcribing speech" if asset.has_audio else "No audio track")
             audio = self._audio.analyze(asset)
+        if single_take:
+            _, video = self._basic_analysis(step, asset)
+            return audio, video
         step("Detecting shots and captioning")
         video = self._video.analyze(asset, cache_dir=self.keyframes_dir / asset.asset_id)
         return audio, video
@@ -268,8 +297,8 @@ class Library:
         step("Extracting a keyframe")
         keyframe = self.keyframes_dir / asset.asset_id / f"{asset.asset_id}_shot_000.jpg"
         keyframe.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.run(["ffmpeg", "-y", "-v", "error", "-ss", str(asset.duration / 2), "-i", str(asset.path),
-                        "-frames:v", "1", "-vf", "scale=480:-2", str(keyframe)], check=True, capture_output=True)
+        if not extract_frame(asset.path, asset.duration / 2, keyframe):
+            raise RuntimeError(f"could not read a frame from {asset.path.name}")
         shot_id = f"{asset.asset_id}_shot_000"
         scene = SceneSegment(shot_id=shot_id, start=0.0, end=asset.duration, keyframe_path=keyframe)
         if not self.vision:  # nothing else will describe it

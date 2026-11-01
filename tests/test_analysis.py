@@ -76,10 +76,10 @@ def test_long_shots_are_described_window_by_window():
 
     describer = FakeDescriber()
     asset = MediaAsset(asset_id="walk", path="/walk.mp4", duration=95.0)
-    d = describer.describe(asset, SceneSegment(shot_id="walk_shot_000", start=0.0, end=95.0))
+    d = describer.describe(asset, SceneSegment(shot_id="walk_shot_000", start=0.0, end=95.0), window=20.0)
     assert sorted(describer.windows) == [(0.0, 20.0), (20.0, 40.0), (40.0, 60.0), (60.0, 80.0), (80.0, 95.0)]
     assert [(m.start, m.end) for m in d.moments][0] == (0.0, 20.0) and len(d.moments) == 5
     assert d.summary.startswith("part at 0s Then: part at 20s") and d.tags == ["forest", "path"]
 
-    short = describer.describe(asset, SceneSegment(shot_id="s", start=0.0, end=25.0))
+    short = describer.describe(asset, SceneSegment(shot_id="s", start=0.0, end=25.0), window=20.0)
     assert short.summary == "part at 0s"  # short shots: one call

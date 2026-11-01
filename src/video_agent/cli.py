@@ -86,6 +86,9 @@ def ui(args: argparse.Namespace) -> None:
     store = MediaStore(workdir / "media_store.db", encoder=encoder)
     library = Library(bundle_path, store, whisper_model=args.whisper_model)
     store.ingest_bundle(library.bundle)
+    resumed = library.resume()
+    if resumed:
+        print(f"Resuming {len(resumed)} interrupted import(s): {', '.join(j.file_name for j in resumed)}")
     stale = library.refresh_stale()
     if stale:
         print(f"Re-analyzing {len(stale)} rush(es) in the background: {', '.join(j.asset_id for j in stale)}")

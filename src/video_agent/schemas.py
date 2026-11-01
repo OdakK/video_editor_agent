@@ -8,6 +8,17 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+class Source360(BaseModel):
+    """Where a flat view of a 360 clip comes from: the full-quality original, used for the final render.
+    The asset itself points to a light proxy used for analysis."""
+
+    path: Path
+    stream: int = 0              # video stream of the lens in the original
+    crop: str | None = None      # for side-by-side circles
+    width: int = 1080
+    height: int = 1920
+
+
 class MediaAsset(BaseModel):
     """A rush available on disk."""
 
@@ -18,6 +29,7 @@ class MediaAsset(BaseModel):
     has_audio: bool = Field(default=True, description="Whether the file has an audio track.")
     analysis: Literal["full", "basic"] = Field(
         default="full", description="basic: imported without the ML models (one shot, no transcript).")
+    source360: Source360 | None = None
 
 
 class WordTiming(BaseModel):
