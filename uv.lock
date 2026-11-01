@@ -1417,18 +1417,16 @@ wheels = [
 
 [[package]]
 name = "opentimelineio"
-version = "0.18.0"
+version = "0.17.0"
 source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/8a/f3/61409750f8a7e606b900676cd9d4f7e990d06635a535a1c4665b074aeab0/opentimelineio-0.18.0.tar.gz", hash = "sha256:3a0cfd790bf39c71d3f2026a66e4c9281e4b3358b5bc513f553bd2f13abfc6e6", size = 2921780, upload-time = "2025-11-06T23:32:19.532Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/8d/cf/9a8392a17295a6215f8edb5bb8b52f17f28f1fab8a1d9e6bbc6968785063/opentimelineio-0.17.0.tar.gz", hash = "sha256:10ef324e710457e9977387cd9ef91eb24a9837bfb370aec3330f9c0f146cea85", size = 2776600, upload-time = "2024-06-24T23:50:05.251Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/75/bc/9f0ca374963d0ee42abebd939c865ffc1c1d7156877706684d8fb850a470/opentimelineio-0.18.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:499abcd12d06004171fb6c57ec961e953bdb07bb2d99104c2313af44899f0b77", size = 1290253, upload-time = "2025-11-06T23:32:01.183Z" },
-    { url = "https://files.pythonhosted.org/packages/c7/81/eda8d5ce6f67c05687a1efcc806822306adde41d68642362c4ec5a5e50f6/opentimelineio-0.18.0-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:77d48b90e0e9a9be49b0c4745928984174dba891b99d9afbdf105fe982951234", size = 799492, upload-time = "2025-11-06T23:32:02.607Z" },
-    { url = "https://files.pythonhosted.org/packages/30/47/62277719f77676acdd852126bcb28896d7ffdeafb61139db1523675d5357/opentimelineio-0.18.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:1a348fde8add57226295bb0e7e217bab23913917b5bd4c3ecde1c32b6155f537", size = 864503, upload-time = "2025-11-06T23:32:04.466Z" },
-    { url = "https://files.pythonhosted.org/packages/af/ad/ed94d2c94ead0417a06be89a4259a63f78a558b5783da4c7ef67db6a6700/opentimelineio-0.18.0-cp312-cp312-win_amd64.whl", hash = "sha256:94ebeeafd122c48266786100795fa5faabd2f55cabe38faa1c7120e611a6d817", size = 642375, upload-time = "2025-11-06T23:32:05.939Z" },
-    { url = "https://files.pythonhosted.org/packages/08/06/6b5732285b99aa916be7129a8674c3ae39b61e7f889c3c80b38f48b99f49/opentimelineio-0.18.0-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:1bc4a815ef64a5c74d86626b9a82611ed0b1f3e9db3f8ec199db380c4b494c07", size = 1232799, upload-time = "2025-11-06T23:32:07.437Z" },
-    { url = "https://files.pythonhosted.org/packages/a9/7f/a5f1b3e209b2f0fca222e1337c0898c9fbb2c5ceb2fdac76307084c943e9/opentimelineio-0.18.0-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:c79f7d36200e1776cfb5780fb0209af6617703ecb33ac71a618f4a2b7754e16e", size = 799493, upload-time = "2025-11-06T23:32:10.608Z" },
-    { url = "https://files.pythonhosted.org/packages/82/1f/0752127ca6fb49656fb3e14230f2e2c4c8d491be17d979ccfe4f1bf61ab8/opentimelineio-0.18.0-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:4eb360366d45dad1cd8aed6c8fed96d12cc44ee5306640297e1c5b9e740e60cd", size = 864502, upload-time = "2025-11-06T23:32:11.771Z" },
-    { url = "https://files.pythonhosted.org/packages/a4/6b/15c45003684f8a33f23a08fc3fe2f3c3666fc2af5cf03e35210f667efa98/opentimelineio-0.18.0-cp313-cp313-win_amd64.whl", hash = "sha256:cfc74731fab7f7888ef320aebfb152ba67bbea48e75561f288b1fb351b0cd0a4", size = 642377, upload-time = "2025-11-06T23:32:13.078Z" },
+    { url = "https://files.pythonhosted.org/packages/f6/ea/489b8c317ff88348a3c68bfbc038c76f04bbba0da4c1f1d46fad6c1724bd/OpenTimelineIO-0.17.0-cp312-cp312-macosx_10_14_x86_64.whl", hash = "sha256:9a9af4105a088c0ab131780e49db268db7e37871aac33db842de6b2b16f14e39", size = 1144494, upload-time = "2024-06-24T23:49:15.274Z" },
+    { url = "https://files.pythonhosted.org/packages/d8/68/e22cb29d78270bd7143dfb395ce5fc4e7494c9814ade1c7936acdfee5081/OpenTimelineIO-0.17.0-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:8e653ad1dd3b85f5c312a742dc24b61b330964aa391dc5bc072fe8b9c85adff1", size = 1144492, upload-time = "2024-06-24T23:49:17.48Z" },
+    { url = "https://files.pythonhosted.org/packages/31/d5/10fa506b9bb9e962dbf78e7e9a316603c272af74097922bb32ce7939dfb2/OpenTimelineIO-0.17.0-cp312-cp312-manylinux_2_17_i686.manylinux2014_i686.whl", hash = "sha256:02a77823c27a1b93c6b87682372c3734ac5fddc10bfe53875e657d43c60fb885", size = 839829, upload-time = "2024-06-24T23:49:19.082Z" },
+    { url = "https://files.pythonhosted.org/packages/95/c2/19fd190f4c584216e06860f4b26670ff8635bd9cb6339ab92d216a08aaae/OpenTimelineIO-0.17.0-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:a4f4efcf3ddd81b62c4feb49a0bcc309b50ffeb6a8c48ab173d169a029006f4d", size = 791060, upload-time = "2024-06-24T23:49:28.121Z" },
+    { url = "https://files.pythonhosted.org/packages/12/fa/1e52a8ae0e96e5ad17505ba1c8273f8a70296f37ca263cbf2ef9f9e07b39/OpenTimelineIO-0.17.0-cp312-cp312-win32.whl", hash = "sha256:9872ab74a20bb2bb3a50af04e80fe9238998d67d6be4e30e45aebe25d3eefac6", size = 522938, upload-time = "2024-06-24T23:49:30.817Z" },
+    { url = "https://files.pythonhosted.org/packages/9f/47/7efd78fc12d372b1f1f263b4ca605dc88e8239da7ba8c0b5ff51519bb752/OpenTimelineIO-0.17.0-cp312-cp312-win_amd64.whl", hash = "sha256:c83b78be3312d3152d7e07ab32b0086fe220acc2a5b035b70ad69a787c0ece62", size = 603278, upload-time = "2024-06-24T23:49:32.378Z" },
 ]
 
 [[package]]
@@ -2509,7 +2507,7 @@ requires-dist = [
     { name = "langgraph-cli", extras = ["inmem"], marker = "extra == 'studio'", specifier = ">=0.4.6" },
     { name = "numpy", specifier = ">=1.26.0" },
     { name = "opencv-python", marker = "extra == 'analysis'", specifier = ">=4.8.1" },
-    { name = "opentimelineio", specifier = ">=0.15.0" },
+    { name = "opentimelineio", specifier = ">=0.17" },
     { name = "pillow", marker = "extra == 'analysis'", specifier = ">=10.2.0" },
     { name = "pydantic", specifier = ">=2.6" },
     { name = "python-dotenv", specifier = ">=1.0.0" },

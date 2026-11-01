@@ -11,7 +11,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "pydantic>=2.6",
     "numpy>=1.26.0",
-    "opentimelineio>=0.15.0",
+    "opentimelineio>=0.17",
 ]
 
 [project.optional-dependencies]

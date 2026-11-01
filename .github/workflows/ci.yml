@@ -15,7 +15,9 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
-      - run: uv sync
+      # The opentimelineio 0.18.0 Linux wheels contain modules built for CPython 3.7
+      # (_opentime.cpython-37m-*.so), so they cannot be imported on 3.12: build it from source.
+      - run: uv sync --no-binary-package opentimelineio
       - name: Lint
         run: uv run ruff check .
       - name: Tests (store, timeline, real ffmpeg render, agent with a scripted model)
