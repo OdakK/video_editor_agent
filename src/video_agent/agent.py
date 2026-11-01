@@ -35,8 +35,9 @@ def default_paths() -> dict[str, Path]:
 
 
 def load_model() -> BaseChatModel:
-    """The model comes from VIDEO_AGENT_MODEL, as provider:model (default: OpenAI)."""
-    return init_chat_model(os.getenv("VIDEO_AGENT_MODEL", "openai:gpt-4.1-mini"), temperature=0)
+    """The model comes from VIDEO_AGENT_MODEL, as provider:model (default: OpenAI GPT-6 Luna)."""
+    # Retries with backoff on rate limits (429) and transient errors.
+    return init_chat_model(os.getenv("VIDEO_AGENT_MODEL", "openai:gpt-6-luna"), temperature=0, max_retries=8)
 
 
 def create_editing_agent(bundle_path: Path | None = None, db_path: Path | None = None,

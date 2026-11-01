@@ -71,7 +71,7 @@ All edits are non-destructive: the source files are never touched, and the `.oti
 
 - Python 3.12 and [uv](https://github.com/astral-sh/uv)
 - `ffmpeg` and `ffprobe` on your `PATH`
-- An API key for the LLM: OpenAI by default, or any provider supported by LangChain (`VIDEO_AGENT_MODEL=anthropic:...`, `azure_openai:...`)
+- An API key for the LLM: OpenAI GPT-6 Luna by default, or any provider supported by LangChain (`VIDEO_AGENT_MODEL=anthropic:...`, `azure_openai:...`), or OpenRouter (see `.env.example`)
 
 ### Install
 
