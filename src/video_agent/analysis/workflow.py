@@ -1,4 +1,7 @@
-"""The analysis pipeline as a LangGraph graph: ingest -> audio_analysis -> video_analysis -> merge."""
+"""The analysis pipeline as a LangGraph graph: ingest -> audio_analysis -> video_analysis -> describe -> merge.
+
+`describe` asks a vision LLM to log each shot (see vision.py). It is skipped without an API key.
+"""
 
 from __future__ import annotations
 
@@ -15,6 +18,7 @@ from .audio import AudioAnalyzer
 from .ingest import discover_media_assets
 from .merge import merge_analysis
 from .video import VideoAnalyzer
+from .vision import VisionDescriber
 
 LOGGER = logging.getLogger(__name__)
 
@@ -29,10 +33,13 @@ class AnalysisState(TypedDict, total=False):
     artifacts: dict[str, str]
 
 
-def build_analysis_workflow(audio: AudioAnalyzer | None = None, video: VideoAnalyzer | None = None):
+def build_analysis_workflow(audio: AudioAnalyzer | None = None, video: VideoAnalyzer | None = None,
+                            vision: VisionDescriber | None | str = "auto"):
     """Return the compiled analysis graph. Pass analyzers to change models or thresholds."""
     audio = audio or AudioAnalyzer()
     video = video or VideoAnalyzer()
+    if vision == "auto":
+        vision = VisionDescriber() if VisionDescriber.available() else None
 
     def ingest(state: AnalysisState) -> dict:
         assets = discover_media_assets(state["input_dir"])
@@ -47,6 +54,20 @@ def build_analysis_workflow(audio: AudioAnalyzer | None = None, video: VideoAnal
         index = {a.asset_id: video.analyze(a, cache_dir=keyframes / a.asset_id) for a in state["media_assets"]}
         return {"video_index": index}
 
+    def describe(state: AnalysisState) -> dict:
+        if vision is None:
+            LOGGER.info("No LLM API key: skipping the vision descriptions")
+            return {}
+        assets = {a.asset_id: a for a in state["media_assets"]}
+        for asset_id, result in state["video_index"].items():
+            for scene in result.scenes:
+                LOGGER.info("Describing %s", scene.shot_id)
+                try:
+                    scene.description = vision.describe(assets[asset_id], scene)
+                except Exception as exc:  # the shot stays usable without its description
+                    LOGGER.warning("Vision description failed for %s: %s", scene.shot_id, exc)
+        return {"video_index": state["video_index"]}
+
     def merge(state: AnalysisState) -> dict:
         bundle = merge_analysis(state["media_assets"], state.get("audio_index", {}), state["video_index"])
         out = _output_dir(state)
@@ -60,11 +81,13 @@ def build_analysis_workflow(audio: AudioAnalyzer | None = None, video: VideoAnal
     graph.add_node("ingest", ingest)
     graph.add_node("audio_analysis", audio_analysis)
     graph.add_node("video_analysis", video_analysis)
+    graph.add_node("describe", describe)
     graph.add_node("merge", merge)
     graph.add_edge(START, "ingest")
     graph.add_edge("ingest", "audio_analysis")
     graph.add_edge("audio_analysis", "video_analysis")
-    graph.add_edge("video_analysis", "merge")
+    graph.add_edge("video_analysis", "describe")
+    graph.add_edge("describe", "merge")
     graph.add_edge("merge", END)
     return graph.compile()
 

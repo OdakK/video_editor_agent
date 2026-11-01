@@ -27,7 +27,8 @@ flowchart LR
         R[/"Raw rushes<br/>(.mp4, .mov, .mkv…)"/] --> I["ingest<br/>ffprobe metadata"]
         I --> AU["audio_analysis<br/>faster-whisper<br/>word timestamps"]
         AU --> V["video_analysis<br/>PySceneDetect shots<br/>+ BLIP keyframe captions"]
-        V --> M["merge<br/>align transcript ↔ shots"]
+        V --> D["describe<br/>vision LLM: place, shot size,<br/>camera, issues, good moments"]
+        D --> M["merge<br/>align transcript ↔ shots"]
         M --> B[("analysis_bundle.json")]
     end
 
@@ -48,24 +49,30 @@ flowchart LR
 1. **Ingest** finds every video file in the input folder and reads its duration, frame rate and audio track with ffprobe. Files without audio skip transcription.
 2. **Audio analysis** transcribes each rush with faster-whisper (voice-activity filtering, word-level timestamps).
 3. **Video analysis** detects shot boundaries with PySceneDetect, extracts a keyframe per shot and captions it with BLIP (optional).
-4. **Merge** aligns transcript segments with the shots they overlap, producing "timeline atoms": one shot, its timecodes, what is said and what is seen.
-5. **Media store** loads the bundle into SQLite: an FTS5 index over both speech and captions for exact queries, and one embedding per shot (transcript + captions) for semantic search. Embeddings are computed once and cached in the database.
-6. **Editing agent** is a tool-calling LLM that combines search and timeline tools to answer requests and build the edit. Tool errors (unknown shot, empty timeline…) are sent back to the model so it can correct itself.
+4. **Describe** sends a few frames of each shot, with their timestamps, to a vision LLM (GPT-6 Luna by default). It returns what an editor logs: a summary, the place (with names read from signs and landmarks), subjects, shot size, camera move, mood, technical issues, and the shot split into moments rated *great*, *usable* or *bad*. Skipped without an API key.
+5. **Merge** aligns transcript segments with the shots they overlap, producing "timeline atoms": one shot, its timecodes, what is said and what is seen.
+6. **Media store** loads the bundle into SQLite: an FTS5 index over both speech and captions for exact queries, and one embedding per shot (transcript + captions) for semantic search. Embeddings are computed once and cached in the database.
+7. **Editing agent** is a tool-calling LLM that combines search and timeline tools to answer requests and build the edit. Tool errors (unknown shot, empty timeline…) are sent back to the model so it can correct itself.
 
 ## Agent tools
 
 | Tool | What it does |
 |---|---|
-| `semantic_search` | Shots closest in meaning to a description, using what is said **and** what is seen. |
-| `keyword_search` | Exact words in transcripts and captions, with FTS5 syntax (`AND`, `OR`, `NEAR`, `"phrase"`). Plain text with punctuation also works. |
-| `list_shots` | Browse the shot catalog, optionally for one rush. |
-| `shots_for_segment` | Map a transcript segment back to its shot(s). |
-| `initialize_timeline` | Start a new empty OTIO timeline. |
-| `insert_shot` | Place a shot at the end, or before the clip playing at a given time. |
-| `split_clip` | Cut the clip playing at a given time into two. |
-| `remove_clip` / `move_clip` | Remove a clip or change its position. |
-| `describe_timeline` | The current edit: clip ids, order, timeline and source timecodes. |
+| `list_shots` | The catalog the agent reads first: duration, summary, place, shot size, camera, issues, moments with their quality and timecodes, speech. |
+| `get_shot` | One shot in full, with each spoken sentence and its timecodes, so cuts fall between sentences. |
+| `semantic_search` / `keyword_search` | Find shots by meaning or by exact words, over speech, captions and descriptions. |
+| `build_timeline` | Lay out a whole edit in one call: shots in order, each with its own in and out points. |
+| `insert_shot` | Add a shot, or only part of it, at the end or at a given time. |
+| `trim_clip` | Change which seconds of its source a clip plays. |
+| `split_clip` / `remove_clip` / `move_clip` | Cut, remove or reorder clips. |
+| `describe_timeline` | The current edit: total duration, clip ids, timeline and source timecodes. |
 | `render_preview` | Render to MP4 with ffmpeg: scales and pads to the largest source, falls back to silent output if a rush has no audio. |
+
+The system prompt gives the agent an editor's method rather than a list of commands: read the material,
+plan (target length, story order, which seconds of each shot and why), lay the edit out in one
+`build_timeline` call, then refine and check. And the craft: open on a hook, establish the place, group
+by place or theme instead of file order, 1.5-4 s per clip without speech, vary shot sizes, never use a
+moment rated *bad*, cut between sentences, and do not claim what the footage does not show.
 
 All edits are non-destructive: the source files are never touched, and the `.otio` file can be opened in other OTIO-compatible tools or converted to EDL.
 
@@ -104,7 +111,7 @@ uv sync --extra analysis --extra ui
 uv run video-agent ui              # opens http://127.0.0.1:8000
 ```
 
-Shot library on the left, preview and timeline in the middle, the agent on the right. You can edit by hand
+Shot library on the left (each shot shows its description, shot size, camera move and any issue), preview and timeline in the middle, the agent on the right. You can edit by hand
 (add, move, remove clips, render) or ask the agent, and watch each tool call stream in while it works.
 Manual and agent edits go through the same timeline code.
 
@@ -180,6 +187,7 @@ tests/                # Fast tests, no model or API key needed
 - **Timeline atoms as the shared language.** Each shot carries its timecodes, overlapping transcript and captions, so the agent reasons about *shots* instead of raw frames or audio.
 - **Keyword and semantic search, over speech and image.** FTS5 handles exact words and names; embeddings handle "the part where they talk about the weather". Both include the BLIP captions, so "the wide shot of the beach" works even when nobody speaks.
 - **Heavy models are optional dependencies, loaded lazily.** The store, timeline and agent install and test without PyTorch, which keeps CI fast.
+- **Logging before editing.** The first version only had one BLIP caption per shot, and no way to cut inside a rush: asked for a travel vlog, the agent put whole rushes end to end. What made the difference was not a bigger model but better material and better tools: a vision model that logs each shot like an assistant editor (place, shot size, good and bad moments with timecodes), in and out points on every clip, and a prompt that describes the editing craft. On the same request and the same rushes, the agent went from 6 full rushes in file order (42 s) to a 20 s edit with trimmed clips, a hook, a story order and a closing shot.
 - **One lock per timeline file.** Models call tools in parallel (three `insert_shot` at once is common), and each edit is a load → modify → save cycle on the `.otio` file. Without the lock, parallel inserts overwrote each other: this was caught in a real session with the UI, and a test now covers it.
 - **OTIO as the output format.** It's an open, non-destructive timeline format, so the rough cut isn't locked into this tool.
 

@@ -48,3 +48,11 @@ def test_parse_ffprobe():
     assert round(info.fps, 3) == 29.97
     assert (info.width, info.height, info.has_audio) == (1920, 1080, True)
     assert parse_ffprobe(json.dumps({"streams": [{"codec_type": "video"}]})).has_audio is False
+
+
+def test_vision_samples_frames_inside_the_shot():
+    from video_agent.analysis.vision import sample_times
+
+    times = sample_times(5.0, 11.0, 6)
+    assert len(times) == 5 and all(5.0 < t < 11.0 for t in times)
+    assert len(sample_times(0.0, 1.0, 6)) == 2  # always at least two frames

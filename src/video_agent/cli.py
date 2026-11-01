@@ -13,9 +13,13 @@ from pathlib import Path
 
 
 def analyze(args: argparse.Namespace) -> None:
+    from dotenv import load_dotenv
+
     from .analysis.audio import AudioAnalyzer
     from .analysis.video import VideoAnalyzer
     from .analysis.workflow import build_analysis_workflow
+
+    load_dotenv()  # API key for the vision descriptions
 
     workflow = build_analysis_workflow(
         AudioAnalyzer(model_size=args.whisper_model, language=args.language),
@@ -82,6 +86,11 @@ def ui(args: argparse.Namespace) -> None:
     store = MediaStore(workdir / "media_store.db", encoder=encoder)
     library = Library(bundle_path, store, whisper_model=args.whisper_model)
     store.ingest_bundle(library.bundle)
+    stale = library.refresh_stale()
+    if stale:
+        print(f"Re-analyzing {len(stale)} rush(es) in the background: {', '.join(j.asset_id for j in stale)}")
+    if not library.vision:
+        print("No LLM API key found: shots will not get vision descriptions.")
     session = Session(store, TimelineManager(workdir / "timeline.otio"), model_name(), library)
     print(f"Video Editor Agent UI: http://{args.host}:{args.port}")
     uvicorn.run(create_app(session), host=args.host, port=args.port, log_level="warning")

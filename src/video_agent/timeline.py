@@ -16,6 +16,17 @@ import opentimelineio as otio
 from .probe import probe
 
 DEFAULT_TRACK = "Video"
+MIN_CLIP = 0.3  # seconds: shorter clips are almost always a mistake
+
+
+def subclip(shot: dict[str, Any], start: float | None, end: float | None) -> dict[str, Any]:
+    """The part of a shot between start and end (seconds in the source file), clamped to the shot."""
+    lo = shot["start"] if start is None else max(shot["start"], start)
+    hi = shot["end"] if end is None else min(shot["end"], end)
+    if hi - lo < MIN_CLIP:
+        raise ValueError(f"{shot['shot_id']}: {lo:.2f}-{hi:.2f}s is outside the shot ({shot['start']:.2f}-"
+                         f"{shot['end']:.2f}s) or shorter than {MIN_CLIP}s.")
+    return {**shot, "start": lo, "end": hi}
 
 # One lock per timeline file: agents call tools in parallel (e.g. three insert_shot at once), and each
 # edit is a load -> modify -> save cycle on the same .otio file, so concurrent edits would overwrite
@@ -52,11 +63,43 @@ class TimelineManager:
 
     @_serialized
     def insert_shot(self, shot: dict[str, Any], timeline_time: float | None = None,
-                    track_name: str = DEFAULT_TRACK) -> list[dict[str, Any]]:
-        """Insert a shot before the clip playing at `timeline_time`, or at the end."""
+                    track_name: str = DEFAULT_TRACK, start: float | None = None,
+                    end: float | None = None) -> list[dict[str, Any]]:
+        """Insert a shot, or the part of it between `start` and `end` (seconds in the source file),
+        before the clip playing at `timeline_time`, or at the end."""
         timeline = self._load()
         track = self._track(timeline, track_name)
-        track.insert(self._insert_index(track, timeline_time), self._clip(shot))
+        track.insert(self._insert_index(track, timeline_time), self._clip(subclip(shot, start, end)))
+        self._save(timeline)
+        return self._summary(track)
+
+    @_serialized
+    def replace_all(self, shots: list[dict[str, Any]], name: str | None = None) -> list[dict[str, Any]]:
+        """Replace the whole edit with these shots, in order. Each may carry its own start and end."""
+        timeline = self._empty_timeline(name or self.default_name)
+        track = self._track(timeline)
+        for shot in shots:
+            track.append(self._clip(subclip(shot, shot.get("in"), shot.get("out"))))
+        self._save(timeline)
+        return self._summary(track)
+
+    @_serialized
+    def trim_clip(self, clip_id: str, source_start: float, source_end: float,
+                  track_name: str = DEFAULT_TRACK) -> list[dict[str, Any]]:
+        """Change which part of the source a clip plays (seconds in the source file)."""
+        timeline = self._load()
+        track = self._track(timeline, track_name)
+        clip = track[self._index_of(track, clip_id)]
+        available = clip.media_reference.available_range
+        limit = available.duration.to_seconds() if available else source_end
+        if not 0 <= source_start < source_end <= limit + 0.05:
+            raise ValueError(f"Invalid range {source_start:.2f}-{source_end:.2f}s: the source lasts {limit:.2f}s.")
+        if source_end - source_start < MIN_CLIP:
+            raise ValueError(f"A clip must last at least {MIN_CLIP}s.")
+        rate = clip.source_range.duration.rate
+        clip.source_range = otio.opentime.TimeRange(
+            otio.opentime.RationalTime.from_seconds(source_start, rate),
+            otio.opentime.RationalTime.from_seconds(source_end - source_start, rate))
         self._save(timeline)
         return self._summary(track)
 

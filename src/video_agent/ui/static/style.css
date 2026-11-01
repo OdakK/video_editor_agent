@@ -134,7 +134,13 @@ svg { width: 16px; height: 16px; flex: none; }
 .layout > .library .thumb .add { right: 5px; top: 5px; bottom: auto; width: 26px; height: 26px; }
 .layout > .library .shot-body { min-width: 0; padding: 7px 10px; gap: 2px; }
 .layout > .library .caption { font-size: 12.5px; line-height: 1.35; }
-.layout > .library .speech { font-size: 12px; }
+.layout > .library .facts { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+.facts span {
+  font-size: 11px; color: var(--muted); background: var(--panel-2); border: 1px solid var(--line);
+  border-radius: 999px; padding: 0 7px; line-height: 18px;
+}
+.facts .issue { color: #ffc46b; border-color: rgba(255, 196, 107, .35); }
+.speech { font-size: 12px; }
 .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .thumb .tc {
   position: absolute; left: 8px; bottom: 8px; font: 11px var(--mono); padding: 2px 6px;

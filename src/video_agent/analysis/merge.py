@@ -35,7 +35,8 @@ def merge_analysis(
                 end=scene.end,
                 transcript_segment_ids=overlapping_segments(segments, scene.start, scene.end),
                 captions=[caption.text for caption in scene.captions],
-                tags=sorted(set(scene.tags)),
+                tags=sorted(set(scene.tags) | set(scene.description.tags if scene.description else [])),
+                description=scene.description,
             ))
     return AnalysisBundle(media_assets=media_assets, audio_index=audio_index,
                           video_index=video_index, timeline_atoms=atoms)

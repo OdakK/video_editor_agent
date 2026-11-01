@@ -38,7 +38,9 @@ CREATE TABLE IF NOT EXISTS shot (
     end REAL NOT NULL,
     keyframe_path TEXT,
     transcript TEXT NOT NULL DEFAULT '',
-    captions TEXT NOT NULL DEFAULT '[]'
+    captions TEXT NOT NULL DEFAULT '[]',
+    tags TEXT NOT NULL DEFAULT '[]',
+    description TEXT            -- ShotDescription as JSON, from the vision model
 );
 CREATE TABLE IF NOT EXISTS transcript_segment (
     segment_id TEXT PRIMARY KEY,
@@ -134,6 +136,11 @@ class MediaStore:
         self.encoder_name = encoder_name if encoder is None else type(encoder).__name__
         with self._connect() as con:
             con.executescript(SCHEMA)
+            # Databases created before the vision descriptions lack these columns.
+            columns = {row["name"] for row in con.execute("PRAGMA table_info(shot)")}
+            for column, ddl in (("tags", "TEXT NOT NULL DEFAULT '[]'"), ("description", "TEXT")):
+                if column not in columns:
+                    con.execute(f"ALTER TABLE shot ADD COLUMN {column} {ddl}")
 
     @contextmanager
     def _connect(self) -> Iterator[sqlite3.Connection]:
@@ -166,17 +173,24 @@ class MediaStore:
             for atom in bundle.timeline_atoms:
                 scene = scenes.get(atom.shot_id)
                 transcript = " ".join(segments[i].text for i in atom.transcript_segment_ids if i in segments)
-                con.execute("INSERT INTO shot VALUES (?, ?, ?, ?, ?, ?, ?)", (
+                description = atom.description.model_dump() if atom.description else None
+                con.execute("""INSERT INTO shot (shot_id, asset_id, start, end, keyframe_path, transcript, captions,
+                               tags, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""", (
                     atom.shot_id, atom.asset_id, atom.start, atom.end,
                     str(scene.keyframe_path) if scene and scene.keyframe_path else None,
-                    transcript, json.dumps(atom.captions)))
+                    transcript, json.dumps(atom.captions), json.dumps(atom.tags),
+                    json.dumps(description) if description else None))
                 con.executemany("INSERT INTO shot_segment VALUES (?, ?)",
                                 [(atom.shot_id, i) for i in atom.transcript_segment_ids if i in segments])
                 con.executemany("INSERT INTO search_fts VALUES (?, 'speech', ?)",
                                 [(atom.shot_id, segments[i].text)
                                  for i in atom.transcript_segment_ids if i in segments])
+                visual = list(atom.captions)
+                if description:
+                    visual += [description["summary"], description["location"], " ".join(description["subjects"]),
+                               " ".join(atom.tags)] + [m["description"] for m in description["moments"]]
                 con.executemany("INSERT INTO search_fts VALUES (?, 'visual', ?)",
-                                [(atom.shot_id, c) for c in atom.captions])
+                                [(atom.shot_id, text) for text in visual if text and text != "unknown"])
 
     # ------------------------------------------------------------------ search
 
@@ -211,7 +225,8 @@ class MediaStore:
     def _shot_vectors(self) -> tuple[list[str], np.ndarray]:
         """Embeddings of every shot, computing and caching the missing ones."""
         with self._connect() as con:
-            shots = con.execute("SELECT shot_id, transcript, captions FROM shot ORDER BY shot_id").fetchall()
+            shots = con.execute(
+                "SELECT shot_id, transcript, captions, description FROM shot ORDER BY shot_id").fetchall()
             cached = {r["shot_id"]: np.frombuffer(r["vector"], dtype=np.float32) for r in con.execute(
                 "SELECT shot_id, vector FROM shot_embedding WHERE model = ?", (self.encoder_name,))}
 
@@ -245,7 +260,7 @@ class MediaStore:
     # ------------------------------------------------------------------ lookups
 
     def list_shots(self, asset_id: str | None = None, limit: int | None = None) -> list[dict]:
-        sql = "SELECT shot_id, asset_id, start, end, keyframe_path, transcript, captions FROM shot"
+        sql = "SELECT shot_id, asset_id, start, end, keyframe_path, transcript, captions, tags, description FROM shot"
         params: list = []
         if asset_id:
             sql += " WHERE asset_id = ?"
@@ -255,7 +270,7 @@ class MediaStore:
             sql += " LIMIT ?"
             params.append(limit)
         with self._connect() as con:
-            return [{**dict(r), "captions": json.loads(r["captions"])} for r in con.execute(sql, params)]
+            return [_decode(r) for r in con.execute(sql, params)]
 
     def shots_for_segment(self, segment_id: str) -> list[dict]:
         with self._connect() as con:
@@ -277,7 +292,25 @@ class MediaStore:
             """, (shot_id,)).fetchone()
         if row is None:
             return None
-        return {**dict(row), "captions": json.loads(row["captions"]), "has_audio": bool(row["has_audio"])}
+        return {**_decode(row), "has_audio": bool(row["has_audio"])}
+
+    def transcript_segments(self, shot_id: str) -> list[dict]:
+        """Speech in a shot, sentence by sentence, with timecodes: where it is safe to cut."""
+        with self._connect() as con:
+            rows = con.execute("""
+                SELECT t.segment_id, t.start, t.end, t.text FROM shot_segment ss
+                JOIN transcript_segment t ON t.segment_id = ss.segment_id
+                WHERE ss.shot_id = ? ORDER BY t.start
+            """, (shot_id,)).fetchall()
+        return [dict(r) for r in rows]
+
+
+def _decode(row) -> dict:
+    data = dict(row)
+    data["captions"] = json.loads(data.get("captions") or "[]")
+    data["tags"] = json.loads(data.get("tags") or "[]")
+    data["description"] = json.loads(data["description"]) if data.get("description") else None
+    return data
 
 
 def shot_document(shot) -> str:
@@ -286,4 +319,8 @@ def shot_document(shot) -> str:
     parts = [shot["transcript"]] if shot["transcript"] else []
     if captions:
         parts.append("Visual: " + "; ".join(captions))
+    if shot["description"]:
+        d = json.loads(shot["description"])
+        parts.append(f"{d['summary']} Location: {d['location']}. Subjects: {', '.join(d['subjects'])}. "
+                     f"{d['shot_size']} shot, {d['mood']}. " + " ".join(m["description"] for m in d["moments"]))
     return " ".join(parts) or "(no speech, no caption)"

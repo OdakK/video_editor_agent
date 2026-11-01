@@ -33,7 +33,7 @@ def library(tmp_path):
     work = tmp_path / "work"
     work.mkdir()
     store = MediaStore(work / "store.db", encoder=HashingEncoder())
-    return Library(work / "analysis_bundle.json", store, mode="basic")
+    return Library(work / "analysis_bundle.json", store, mode="basic", vision=None)
 
 
 def test_import_adds_the_rush_to_the_bundle_and_the_store(tmp_path, library):
@@ -48,7 +48,7 @@ def test_import_adds_the_rush_to_the_bundle_and_the_store(tmp_path, library):
     assert shots[0]["end"] == pytest.approx(3.0, abs=0.1)
     assert library.bundle_path.exists()  # persisted, so a restart keeps the import
 
-    reloaded = Library(library.bundle_path, library.store, mode="basic")
+    reloaded = Library(library.bundle_path, library.store, mode="basic", vision=None)
     assert [a.asset_id for a in reloaded.bundle.media_assets] == ["My_clip"]
 
 

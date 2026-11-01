@@ -3,8 +3,12 @@
 Two analysis modes:
 - full: the real pipeline (Whisper transcription, shot detection, BLIP captions), when the
   `analysis` extra is installed;
-- basic: without it, each file becomes one shot with a keyframe and no transcript, so the
-  UI still works for manual editing and keyword search on file names.
+- basic: without it, each file becomes one shot with a keyframe and no transcript.
+In both modes, when an LLM API key is set, a vision model then describes every shot (place,
+subjects, shot size, camera, issues, and the good and bad moments): see analysis/vision.py.
+
+When the library opens in full mode, rushes that were imported in basic mode, or that have no
+vision description yet, are re-analyzed in the background.
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ from typing import BinaryIO
 
 from .analysis.ingest import VIDEO_EXTENSIONS
 from .analysis.merge import merge_analysis
+from .analysis.vision import VisionDescriber
 from .probe import probe
 from .schemas import (
     AnalysisBundle,
@@ -55,7 +60,7 @@ class ImportJob:
 
 class Library:
     def __init__(self, bundle_path: Path, store: MediaStore, mode: str | None = None,
-                 whisper_model: str = "small") -> None:
+                 whisper_model: str = "small", vision: VisionDescriber | None | str = "auto") -> None:
         self.bundle_path = bundle_path.resolve()
         self.workdir = self.bundle_path.parent
         self.rushes_dir = self.workdir / "rushes"
@@ -71,6 +76,32 @@ class Library:
         self._worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="import")
         self.whisper_model = whisper_model
         self._audio = self._video = None
+        if vision == "auto":  # use the vision model when an API key is configured
+            vision = VisionDescriber() if VisionDescriber.available() else None
+        self.vision = vision
+
+    def refresh_stale(self) -> list[ImportJob]:
+        """Queue re-analysis of rushes that are less analyzed than this library can do."""
+        jobs = []
+        for asset in self.bundle.media_assets:
+            scenes = self.bundle.video_index.get(asset.asset_id)
+            basic = asset.analysis == "basic" or any(
+                c.text.startswith("full rush ") for s in (scenes.scenes if scenes else []) for c in s.captions)
+            undescribed = self.vision and scenes and any(s.description is None for s in scenes.scenes)
+            if (basic and self.mode == "full") or undescribed:
+                jobs.append(self.reanalyze(asset.asset_id))
+        return jobs
+
+    def reanalyze(self, asset_id: str) -> ImportJob:
+        asset = next((a for a in self.bundle.media_assets if a.asset_id == asset_id), None)
+        if asset is None:
+            raise ValueError(f"Unknown rush {asset_id}")
+        with self._lock:
+            job = ImportJob(id=next(self._ids), file_name=asset.path.name, asset_id=asset_id,
+                            step="Waiting (re-analysis)")
+            self.jobs[job.id] = job
+        self._worker.submit(self._analyze, job, asset.path)
+        return job
 
     # ------------------------------------------------------------------ import
 
@@ -135,15 +166,23 @@ class Library:
             if not info.duration:
                 raise ValueError("no video stream found")
             asset = MediaAsset(asset_id=job.asset_id, path=path, duration=info.duration, fps=info.fps,
-                               has_audio=info.has_audio)
+                               has_audio=info.has_audio, analysis=self.mode)
             if self.mode == "full":
                 audio, video = self._full_analysis(job, asset)
             else:
                 audio, video = self._basic_analysis(job, asset)
+            if self.vision:
+                for i, scene in enumerate(video.scenes, 1):
+                    job.step = f"Describing shot {i}/{len(video.scenes)}"
+                    try:
+                        scene.description = self.vision.describe(asset, scene)
+                    except Exception as exc:  # the rush stays usable without the description
+                        LOGGER.warning("Vision description failed for %s: %s", scene.shot_id, exc)
 
             job.step = "Indexing"
             with self._lock:
-                bundle = merge_analysis([*self.bundle.media_assets, asset],
+                others = [a for a in self.bundle.media_assets if a.asset_id != asset.asset_id]  # re-analysis
+                bundle = merge_analysis([*others, asset],
                                         {**self.bundle.audio_index, asset.asset_id: audio},
                                         {**self.bundle.video_index, asset.asset_id: video})
                 self.bundle_path.parent.mkdir(parents=True, exist_ok=True)
@@ -175,9 +214,10 @@ class Library:
         subprocess.run(["ffmpeg", "-y", "-v", "error", "-ss", str(asset.duration / 2), "-i", str(asset.path),
                         "-frames:v", "1", "-vf", "scale=480:-2", str(keyframe)], check=True, capture_output=True)
         shot_id = f"{asset.asset_id}_shot_000"
-        scene = SceneSegment(shot_id=shot_id, start=0.0, end=asset.duration, keyframe_path=keyframe, captions=[
-            FrameCaption(caption_id=f"{shot_id}_cap_00", timecode=asset.duration / 2,
-                         text=f"full rush {asset.path.name} (not analyzed: install the analysis extra)")])
+        scene = SceneSegment(shot_id=shot_id, start=0.0, end=asset.duration, keyframe_path=keyframe)
+        if not self.vision:  # nothing else will describe it
+            scene.captions = [FrameCaption(caption_id=f"{shot_id}_cap_00", timecode=asset.duration / 2,
+                                           text=f"full rush {asset.path.name} (not analyzed)")]
         return (AudioAnalysisResult(asset_id=asset.asset_id),
                 VideoAnalysisResult(asset_id=asset.asset_id, scenes=[scene]))
 

@@ -105,3 +105,27 @@ def test_render_real_files(tmp_path, encoder):
     assert result["audio"] is True
     assert (info.width, info.height) == (640, 360)
     assert info.duration == pytest.approx(11.0, abs=0.2)
+
+
+def test_insert_part_of_a_shot_and_trim(timeline, store):
+    clips = timeline.insert_shot(store.get_shot("beach_shot_001"), start=6.0, end=8.5)  # shot is 5-10 s
+    assert (clips[0]["source_start"], clips[0]["source_end"]) == (6.0, 8.5)
+    clips = timeline.trim_clip(clips[0]["clip_id"], 7.0, 9.0)
+    assert (clips[0]["source_start"], clips[0]["source_end"]) == (7.0, 9.0)
+    with pytest.raises(ValueError, match="source lasts"):
+        timeline.trim_clip(clips[0]["clip_id"], 7.0, 99.0)
+    with pytest.raises(ValueError, match="at least"):
+        timeline.trim_clip(clips[0]["clip_id"], 7.0, 7.1)
+    with pytest.raises(ValueError, match="outside the shot"):
+        timeline.insert_shot(store.get_shot("beach_shot_001"), start=1.0, end=2.0)
+
+
+def test_replace_all_lays_out_an_edit_in_one_call(timeline, store):
+    timeline.insert_shot(store.get_shot("interview_shot_000"))
+    clips = timeline.replace_all([
+        {**store.get_shot("beach_shot_001"), "in": 6.0, "out": 8.0},
+        {**store.get_shot("beach_shot_000"), "in": None, "out": 2.5},
+    ], name="Recap")
+    assert [(c["shot_id"], c["source_start"], c["source_end"]) for c in clips] == [
+        ("beach_shot_001", 6.0, 8.0), ("beach_shot_000", 0.0, 2.5)]
+    assert clips[-1]["timeline_end"] == 4.5

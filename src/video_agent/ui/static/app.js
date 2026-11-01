@@ -64,7 +64,8 @@ function apply(next) {
 function renderShots() {
   const q = els.filter.value.trim().toLowerCase();
   const shots = state.shots.filter((s) =>
-    !q || [s.shot_id, s.asset_id, s.transcript, ...(s.captions || [])].join(" ").toLowerCase().includes(q));
+    !q || [s.shot_id, s.asset_id, s.transcript, ...(s.captions || []), ...(s.tags || []), s.description?.summary,
+      s.description?.location].join(" ").toLowerCase().includes(q));
   els.shotCount.textContent = q ? `${shots.length} / ${state.shots.length}` : `${state.shots.length}`;
   els.shotList.innerHTML = shots.length ? "" : `<p class="empty-note">${state.shots.length
     ? "No shot matches this filter." : "No rushes yet: import video files, or drop them here."}</p>`;
@@ -81,7 +82,10 @@ function renderShots() {
       </div>
       <div class="shot-body">
         <span class="shot-id">${escape(s.shot_id)}</span>
-        ${s.captions?.length ? `<span class="caption">${escape(s.captions.join("; "))}</span>` : ""}
+        ${s.description ? `<span class="caption">${escape(s.description.summary)}</span>
+          <span class="facts">${[s.description.shot_size, s.description.camera, s.description.mood].filter(Boolean).map((f) => `<span>${escape(f)}</span>`).join("")}
+          ${s.description.issues?.length ? `<span class="issue" title="${escape(s.description.issues.join(", "))}">⚠ ${escape(s.description.issues[0])}</span>` : ""}</span>`
+          : s.captions?.length ? `<span class="caption">${escape(s.captions.join("; "))}</span>` : ""}
         ${s.transcript ? `<span class="speech">${escape(s.transcript)}</span>` : ""}
       </div>`;
     card.querySelector(".add").addEventListener("click", () => edit("/api/timeline/insert", { shot_id: s.shot_id }));
@@ -259,7 +263,7 @@ async function send(text) {
             step.querySelector(".icon").innerHTML = ev.ok ? icons.check : icons.close;
             step.querySelector(".result").textContent = ev.summary;
           }
-          if (ev.ok && /insert_shot|split_clip|remove_clip|move_clip|initialize_timeline|render_preview/.test(ev.name)) {
+          if (ev.ok && /build_timeline|insert_shot|trim_clip|split_clip|remove_clip|move_clip|render_preview/.test(ev.name)) {
             refresh();  // show edits live, while the agent keeps working
           }
           if (ev.ok && /search/.test(ev.name)) {
