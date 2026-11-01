@@ -28,14 +28,23 @@
   <main class="layout">
     <section class="panel library" aria-labelledby="library-title">
       <div class="panel-head">
-        <h2 id="library-title">Shots</h2>
-        <span class="count" id="shot-count"></span>
+        <h2 id="library-title">Shots <span class="count" id="shot-count"></span></h2>
+        <button class="btn small" id="import-btn" title="Import video files (or drop them here)">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4m0 0l-4.5 4.5M12 4l4.5 4.5M5 15v3.5A1.5 1.5 0 006.5 20h11a1.5 1.5 0 001.5-1.5V15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          Import
+        </button>
+        <input type="file" id="file-input" accept="video/*,.mxf,.mkv,.webm" multiple hidden>
       </div>
+      <ul class="jobs" id="jobs" aria-live="polite"></ul>
       <label class="search">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 16l4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
         <input id="filter" type="search" placeholder="Filter by words, caption, rush…" autocomplete="off">
       </label>
       <div class="shot-list" id="shot-list" aria-live="polite"></div>
+      <div class="dropzone" id="dropzone" hidden>
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4m0 0l-4.5 4.5M12 4l4.5 4.5M5 15v3.5A1.5 1.5 0 006.5 20h11a1.5 1.5 0 001.5-1.5V15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        <p>Drop your rushes to import them</p>
+      </div>
     </section>
 
     <section class="panel stage" aria-label="Preview and timeline">

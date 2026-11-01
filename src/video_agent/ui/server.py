@@ -2,7 +2,8 @@
 
 The chat streams the agent's steps (tool calls and results) as Server-Sent Events, so you see
 the agent search, insert and render while it works. Manual edits from the UI (add, move,
-remove a clip) go through the same TimelineManager as the agent's tools.
+remove a clip) go through the same TimelineManager as the agent's tools. Rushes can be
+imported from the page: they are analyzed in the background and added to the library.
 """
 
 from __future__ import annotations
@@ -15,13 +16,14 @@ import time
 from collections.abc import Iterator
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from langchain_core.messages import AIMessage, AnyMessage, HumanMessage, ToolMessage
 from pydantic import BaseModel
 
 from ..agent import build_agent
+from ..library import Library
 from ..store import MediaStore
 from ..timeline import TimelineManager
 
@@ -31,8 +33,10 @@ STATIC = Path(__file__).parent / "static"
 class Session:
     """One local editing session: store, timeline, agent and chat history."""
 
-    def __init__(self, store: MediaStore, timeline: TimelineManager, model_name: str) -> None:
+    def __init__(self, store: MediaStore, timeline: TimelineManager, model_name: str,
+                 library: Library | None = None) -> None:
         self.store = store
+        self.library = library
         self.timeline = timeline
         self.model_name = model_name
         self.output_dir = timeline.timeline_path.parent
@@ -74,7 +78,8 @@ def create_app(session: Session) -> FastAPI:
         for s in shots:
             s.pop("keyframe_path", None)
         return {"model": session.model_name, "shots": shots, "timeline": session.timeline.describe(),
-                **_preview_urls(session), "conversation": _conversation(session.history)}
+                **_preview_urls(session), "conversation": _conversation(session.history),
+                "import_mode": session.library.mode if session.library else None}
 
     @app.get("/api/state")
     def get_state() -> dict:
@@ -110,6 +115,33 @@ def create_app(session: Session) -> FastAPI:
         session.history.clear()
         session.preview = None
         return state()
+
+    @app.post("/api/upload")
+    def upload(files: list[UploadFile] = File(...)) -> dict:  # noqa: B008 (FastAPI dependency)
+        if session.library is None:
+            raise HTTPException(400, "Import is not available in this session.")
+        jobs, errors = [], []
+        for f in files:
+            try:
+                jobs.append(session.library.import_file(f.filename or "rush.mp4", f.file).as_dict())
+            except ValueError as exc:
+                errors.append(str(exc))
+        return {"jobs": jobs, "errors": errors}
+
+    @app.delete("/api/rushes/{asset_id}")
+    def delete_rush(asset_id: str) -> dict:
+        if session.library is None:
+            raise HTTPException(400, "Deleting rushes is not available in this session.")
+        try:
+            shots = session.library.remove_asset(asset_id)
+        except ValueError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        clips = session.timeline.remove_asset(asset_id)
+        return {**state(), "removed": {"shots": shots, "clips": clips}}
+
+    @app.get("/api/jobs")
+    def jobs() -> dict:
+        return {"jobs": session.library.list_jobs() if session.library else []}
 
     @app.post("/api/chat")
     def chat(req: ChatRequest) -> StreamingResponse:

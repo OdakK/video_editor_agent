@@ -6,6 +6,8 @@ const els = {
   duration: $("timeline-duration"), messages: $("messages"), welcome: $("welcome"),
   composer: $("composer"), prompt: $("prompt"), send: $("send-btn"), status: $("agent-status"),
   render: $("render-btn"), reset: $("reset-btn"), toast: $("toast"),
+  importBtn: $("import-btn"), fileInput: $("file-input"), jobs: $("jobs"), dropzone: $("dropzone"),
+  library: document.querySelector(".library"),
 };
 
 let state = { shots: [], timeline: [], preview_url: null };
@@ -15,6 +17,7 @@ const icons = {
   plus: '<svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>',
   left: '<svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   right: '<svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  trash: '<svg viewBox="0 0 24 24"><path d="M4.5 7h15M9.5 7V4.8c0-.4.4-.8.8-.8h3.4c.4 0 .8.4.8.8V7m2.5 0l-.7 11.2c-.1.9-.8 1.8-1.7 1.8H9.4c-.9 0-1.6-.9-1.7-1.8L7 7m3 4v5m4-5v5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   close: '<svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"/></svg>',
   check: '<svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 };
@@ -63,7 +66,8 @@ function renderShots() {
   const shots = state.shots.filter((s) =>
     !q || [s.shot_id, s.asset_id, s.transcript, ...(s.captions || [])].join(" ").toLowerCase().includes(q));
   els.shotCount.textContent = q ? `${shots.length} / ${state.shots.length}` : `${state.shots.length}`;
-  els.shotList.innerHTML = shots.length ? "" : '<p class="empty-note">No shot matches this filter.</p>';
+  els.shotList.innerHTML = shots.length ? "" : `<p class="empty-note">${state.shots.length
+    ? "No shot matches this filter." : "No rushes yet: import video files, or drop them here."}</p>`;
   for (const s of shots) {
     const card = document.createElement("article");
     card.className = "shot";
@@ -73,6 +77,7 @@ function renderShots() {
         ${s.keyframe_url ? `<img src="${s.keyframe_url}" alt="" loading="lazy">` : ""}
         <span class="tc">${fmt(s.start)} → ${fmt(s.end)}</span>
         <button class="add" aria-label="Add ${escape(s.shot_id)} to the timeline" title="Add to timeline">${icons.plus}</button>
+        ${state.import_mode ? `<button class="delete" aria-label="Delete rush ${escape(s.asset_id)}" title="Delete the rush ${escape(s.asset_id)}">${icons.trash}</button>` : ""}
       </div>
       <div class="shot-body">
         <span class="shot-id">${escape(s.shot_id)}</span>
@@ -80,7 +85,25 @@ function renderShots() {
         ${s.transcript ? `<span class="speech">${escape(s.transcript)}</span>` : ""}
       </div>`;
     card.querySelector(".add").addEventListener("click", () => edit("/api/timeline/insert", { shot_id: s.shot_id }));
+    card.querySelector(".delete")?.addEventListener("click", () => deleteRush(s.asset_id));
     els.shotList.append(card);
+  }
+}
+
+async function deleteRush(assetId) {
+  const shots = state.shots.filter((s) => s.asset_id === assetId).length;
+  const clips = state.timeline.filter((c) => c.shot_id.startsWith(`${assetId}_shot_`)).length;
+  const details = [`${shots} shot${shots > 1 ? "s" : ""}`];
+  if (clips) details.push(`${clips} clip${clips > 1 ? "s" : ""} in the timeline`);
+  if (!confirm(`Delete the rush "${assetId}"? This removes ${details.join(" and ")}.`)) return;
+  try {
+    const res = await fetch(`/api/rushes/${encodeURIComponent(assetId)}`, { method: "DELETE" });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || res.statusText);
+    apply(data);
+    toast(`Deleted ${assetId}.`, "info");
+  } catch (err) {
+    toast(err.message);
   }
 }
 
@@ -282,6 +305,82 @@ function autosize() {
   els.prompt.style.height = `${Math.min(els.prompt.scrollHeight, 160)}px`;
 }
 
+// ---------- import ----------
+const uploads = [];  // files being uploaded (before the server creates a job)
+let polling = null;
+
+function renderJobs(serverJobs = []) {
+  const rows = [
+    ...uploads.map((u) => ({ file_name: u.name, status: u.error ? "error" : "uploading", step: u.error ? "Failed" : `Uploading ${u.progress}%`, error: u.error, progress: u.progress })),
+    ...serverJobs.filter((j) => j.status !== "done" || Date.now() - (renderJobs.doneAt[j.id] ??= Date.now()) < 6000),
+  ];
+  els.jobs.innerHTML = "";
+  for (const j of rows) {
+    const li = document.createElement("li");
+    li.className = `job ${j.status}`;
+    const icon = j.status === "done" ? icons.check : j.status === "error" ? icons.close : '<span class="spinner"></span>';
+    li.innerHTML = `<span class="icon">${icon}</span><span class="file" title="${escape(j.file_name)}">${escape(j.file_name)}</span>
+      <span class="step">${escape(j.step)}</span>
+      ${j.status === "uploading" ? `<span class="bar"><span style="width:${j.progress}%"></span></span>` : ""}
+      ${j.error ? `<span class="detail">${escape(j.error)}</span>` : ""}`;
+    els.jobs.append(li);
+  }
+}
+renderJobs.doneAt = {};
+
+function upload(files) {
+  const videos = [...files].filter((f) => f.type.startsWith("video/") || /\.(mp4|mov|mxf|mkv|avi|m4v|webm)$/i.test(f.name));
+  if (!videos.length) return toast("Only video files can be imported.");
+  const entry = { name: videos.length === 1 ? videos[0].name : `${videos.length} files`, progress: 0, error: null };
+  uploads.push(entry);
+  renderJobs();
+  const form = new FormData();
+  videos.forEach((f) => form.append("files", f));
+  const xhr = new XMLHttpRequest();  // XHR rather than fetch, for upload progress
+  xhr.open("POST", "/api/upload");
+  xhr.upload.onprogress = (e) => { if (e.lengthComputable) { entry.progress = Math.round((e.loaded / e.total) * 100); renderJobs(); } };
+  xhr.onload = () => {
+    uploads.splice(uploads.indexOf(entry), 1);
+    let data = {};
+    try { data = JSON.parse(xhr.responseText); } catch {}
+    if (xhr.status >= 400) toast(data.detail || `Upload failed (${xhr.status})`);
+    (data.errors || []).forEach((e) => toast(e));
+    pollJobs();
+  };
+  xhr.onerror = () => { entry.error = "Network error"; renderJobs(); };
+  xhr.send(form);
+}
+
+async function pollJobs() {
+  clearTimeout(polling);
+  try {
+    const { jobs } = await api("/api/jobs");
+    const finished = jobs.filter((j) => j.status === "done" && !pollJobs.seen.has(j.id));
+    finished.forEach((j) => pollJobs.seen.add(j.id));
+    if (finished.length) await refresh();
+    renderJobs(jobs);
+    const active = jobs.some((j) => j.status === "queued" || j.status === "analyzing") || uploads.length;
+    const recent = jobs.some((j) => j.status === "done" && Date.now() - (renderJobs.doneAt[j.id] ?? 0) < 6000);
+    if (active || recent) polling = setTimeout(pollJobs, 1200);
+  } catch (err) {
+    polling = setTimeout(pollJobs, 3000);
+  }
+}
+pollJobs.seen = new Set();
+
+els.importBtn.addEventListener("click", () => els.fileInput.click());
+els.fileInput.addEventListener("change", () => { upload(els.fileInput.files); els.fileInput.value = ""; });
+let dragDepth = 0;
+els.library.addEventListener("dragenter", (e) => { if (e.dataTransfer?.types.includes("Files")) { e.preventDefault(); dragDepth++; els.dropzone.hidden = false; } });
+els.library.addEventListener("dragover", (e) => { if (e.dataTransfer?.types.includes("Files")) e.preventDefault(); });
+els.library.addEventListener("dragleave", () => { if (--dragDepth <= 0) { dragDepth = 0; els.dropzone.hidden = true; } });
+els.library.addEventListener("drop", (e) => {
+  e.preventDefault();
+  dragDepth = 0;
+  els.dropzone.hidden = true;
+  if (e.dataTransfer?.files.length) upload(e.dataTransfer.files);
+});
+
 // ---------- events ----------
 els.composer.addEventListener("submit", (e) => { e.preventDefault(); send(els.prompt.value); });
 els.prompt.addEventListener("input", autosize);
@@ -302,4 +401,8 @@ els.reset.addEventListener("click", async () => {
   addMessage("agent", "New edit started: the timeline and the conversation are empty.");
 });
 
-refresh(true);
+refresh(true).then(async () => {
+  // Mark jobs that were already done before this page load, so they don't trigger refreshes.
+  try { (await api("/api/jobs")).jobs.forEach((j) => j.status === "done" && pollJobs.seen.add(j.id)); } catch {}
+  pollJobs();
+});

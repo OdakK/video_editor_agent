@@ -57,27 +57,32 @@ def ui(args: argparse.Namespace) -> None:
     import uvicorn
     from dotenv import load_dotenv
 
-    from .store import HashingEncoder, MediaStore, load_analysis_bundle
+    from .library import Library, has_analysis_extra
+    from .store import HashingEncoder, MediaStore
     from .timeline import TimelineManager
     from .ui.server import Session, create_app, model_name
 
     load_dotenv()
+    full = has_analysis_extra()
     if args.demo:
         from .demo import build_demo
 
         print("Building the demo footage with ffmpeg…")
         bundle_path = build_demo(args.demo_dir)
-        encoder = HashingEncoder()  # the demo runs without downloading an embedding model
     else:
+        # Start from an existing analysis, or from an empty library to fill by importing rushes.
         bundle_path = args.bundle or Path("output/analysis_bundle.json")
-        if not bundle_path.exists():
-            raise SystemExit(f"{bundle_path} not found: run `video-agent analyze` first, "
-                             "or try `video-agent ui --demo`.")
-        encoder = None
+    if not full:
+        print("The analysis extra is not installed: imported rushes get one shot each, without transcript.\n"
+              "Install it for transcription, shot detection and captions: uv sync --extra analysis --extra ui")
+    # The demo and the basic mode use the lightweight encoder, so nothing has to be downloaded.
+    encoder = None if full and not args.demo else HashingEncoder()
     workdir = bundle_path.parent
+    workdir.mkdir(parents=True, exist_ok=True)
     store = MediaStore(workdir / "media_store.db", encoder=encoder)
-    store.ingest_bundle(load_analysis_bundle(bundle_path))
-    session = Session(store, TimelineManager(workdir / "timeline.otio"), model_name())
+    library = Library(bundle_path, store, whisper_model=args.whisper_model)
+    store.ingest_bundle(library.bundle)
+    session = Session(store, TimelineManager(workdir / "timeline.otio"), model_name(), library)
     print(f"Video Editor Agent UI: http://{args.host}:{args.port}")
     uvicorn.run(create_app(session), host=args.host, port=args.port, log_level="warning")
 
@@ -107,6 +112,7 @@ def main() -> None:
     p.add_argument("--bundle", type=Path, default=None, help="analysis_bundle.json (default: output/)")
     p.add_argument("--demo", action="store_true", help="generate synthetic demo rushes and open them")
     p.add_argument("--demo-dir", type=Path, default=Path("demo"))
+    p.add_argument("--whisper-model", default="small", help="Whisper model for imported rushes")
     p.add_argument("--host", default="127.0.0.1")
     p.add_argument("--port", type=int, default=8000)
     p.set_defaults(func=ui)

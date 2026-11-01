@@ -50,8 +50,14 @@ RUSHES = [
 
 
 def build_demo(output_dir: Path | str = "demo") -> Path:
-    """Generate the rushes, keyframes and analysis bundle. Returns the bundle path."""
+    """Generate the rushes, keyframes and analysis bundle. Returns the bundle path.
+
+    An existing demo is reused as is, so rushes imported into it from the UI are kept.
+    Delete the folder to start from a fresh demo.
+    """
     out = Path(output_dir).resolve()
+    if (out / "analysis_bundle.json").exists():
+        return out / "analysis_bundle.json"
     rushes, keyframes = out / "rushes", out / "keyframes"
     rushes.mkdir(parents=True, exist_ok=True)
     keyframes.mkdir(parents=True, exist_ok=True)

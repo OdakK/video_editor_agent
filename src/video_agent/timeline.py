@@ -93,6 +93,18 @@ class TimelineManager:
         return self._summary(track)
 
     @_serialized
+    def remove_asset(self, asset_id: str, track_name: str = DEFAULT_TRACK) -> int:
+        """Remove every clip that comes from a rush. Returns the number of clips removed."""
+        timeline = self._load()
+        track = self._track(timeline, track_name)
+        indexes = [i for i, clip in enumerate(track) if clip.metadata.get("editing", {}).get("asset_id") == asset_id]
+        for i in reversed(indexes):
+            del track[i]
+        if indexes:
+            self._save(timeline)
+        return len(indexes)
+
+    @_serialized
     def describe(self, track_name: str = DEFAULT_TRACK) -> list[dict[str, Any]]:
         return self._summary(self._track(self._load(), track_name))
 

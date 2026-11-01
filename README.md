@@ -108,6 +108,17 @@ Shot library on the left, preview and timeline in the middle, the agent on the r
 (add, move, remove clips, render) or ask the agent, and watch each tool call stream in while it works.
 Manual and agent edits go through the same timeline code.
 
+**Import rushes from the page**: click *Import* or drop video files on the shot library. Each file is
+analyzed in the background (transcription, shot detection, captions), with its progress shown in the
+library, then indexed and added to the existing analysis. The UI starts with an empty library if you
+have not analyzed anything yet. Without the `analysis` extra, imports fall back to a basic mode: one
+shot per file, with a keyframe but no transcript. Imports use Whisper `small` by default, for a
+reasonable wait (`--whisper-model` to change it).
+
+**Delete a rush** with the bin icon on any of its shots: its shots leave the library and its clips
+leave the timeline. Only files the UI owns are deleted from disk (imported copies and keyframes);
+original rushes analyzed with `video-agent analyze` are never touched.
+
 **No rushes at hand?** `uv run video-agent ui --demo` generates three synthetic rushes with ffmpeg
 (test patterns and tones, with a hand-written transcript and captions) and opens them. It needs no
 ML model, only ffmpeg and an API key for the LLM.
@@ -138,7 +149,7 @@ Try requests like:
 uv sync && uv run pytest -v
 ```
 
-The tests run in a few seconds, without models or API keys: the analysis output is a small hand-made bundle and the sentence encoder is replaced by a deterministic bag-of-words hash. They cover the transcript ↔ shot alignment, keyword and semantic search (including the embedding cache), every timeline operation, **concurrent edits** (agents call tools in parallel), the ffmpeg command, the agent loop and the web UI's API with a scripted model, and an **end-to-end render**: two test clips are generated with ffmpeg, edited, rendered, and the output duration and resolution are checked. CI runs them on every push.
+The tests run in a few seconds, without models or API keys: the analysis output is a small hand-made bundle and the sentence encoder is replaced by a deterministic bag-of-words hash. They cover the transcript ↔ shot alignment, keyword and semantic search (including the embedding cache), every timeline operation, **concurrent edits** (agents call tools in parallel), the ffmpeg command, the agent loop and the web UI's API with a scripted model, rush import and deletion (including broken files, name clashes, and a check that original rushes are never deleted), and an **end-to-end render**: two test clips are generated with ffmpeg, edited, rendered, and the output duration and resolution are checked. CI runs them on every push.
 
 ## Project structure
 
@@ -157,6 +168,7 @@ src/video_agent/
 ├── tools.py          # The agent's tools
 ├── agent.py          # Editing agent (also exposed to `langgraph dev`)
 ├── ui/               # FastAPI server + static page (no build step), chat streamed as SSE
+├── library.py        # Rush import from the UI: background analysis and re-indexing
 ├── demo.py           # Synthetic demo rushes
 └── cli.py            # video-agent analyze | chat | ui
 tests/                # Fast tests, no model or API key needed

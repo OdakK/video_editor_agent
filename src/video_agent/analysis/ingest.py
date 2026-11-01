@@ -11,7 +11,7 @@ from ..schemas import MediaAsset
 
 LOGGER = logging.getLogger(__name__)
 
-VIDEO_EXTENSIONS = {".mp4", ".mov", ".mxf", ".mkv", ".avi", ".m4v"}
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".mxf", ".mkv", ".avi", ".m4v", ".webm"}
 
 
 def discover_media_assets(base_dir: Path | str) -> list[MediaAsset]:
