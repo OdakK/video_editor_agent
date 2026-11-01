@@ -56,3 +56,30 @@ def test_vision_samples_frames_inside_the_shot():
     times = sample_times(5.0, 11.0, 6)
     assert len(times) == 5 and all(5.0 < t < 11.0 for t in times)
     assert len(sample_times(0.0, 1.0, 6)) == 2  # always at least two frames
+
+
+def test_long_shots_are_described_window_by_window():
+    """A 10-minute 360 walk has no cut: describe it in 20 s windows so the moments stay precise."""
+    from video_agent.analysis.vision import VisionDescriber
+    from video_agent.schemas import MediaAsset, Moment, SceneSegment, ShotDescription
+
+    class FakeDescriber(VisionDescriber):
+        def __init__(self):
+            super().__init__(model=object())
+            self.windows = []
+
+        def _describe_window(self, asset, start, end):
+            self.windows.append((start, end))
+            return ShotDescription(summary=f"part at {start:.0f}s", shot_size="wide", camera="handheld",
+                                   tags=["forest", "Forest", "path"],
+                                   moments=[Moment(start=start, end=end, description="walk", quality="usable")])
+
+    describer = FakeDescriber()
+    asset = MediaAsset(asset_id="walk", path="/walk.mp4", duration=95.0)
+    d = describer.describe(asset, SceneSegment(shot_id="walk_shot_000", start=0.0, end=95.0))
+    assert sorted(describer.windows) == [(0.0, 20.0), (20.0, 40.0), (40.0, 60.0), (60.0, 80.0), (80.0, 95.0)]
+    assert [(m.start, m.end) for m in d.moments][0] == (0.0, 20.0) and len(d.moments) == 5
+    assert d.summary.startswith("part at 0s Then: part at 20s") and d.tags == ["forest", "path"]
+
+    short = describer.describe(asset, SceneSegment(shot_id="s", start=0.0, end=25.0))
+    assert short.summary == "part at 0s"  # short shots: one call

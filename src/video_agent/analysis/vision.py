@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import base64
 import logging
+import math
 import os
 import subprocess
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Literal
 
@@ -69,7 +71,27 @@ class VisionDescriber:
             self._model = init_chat_model(name, temperature=0, max_retries=6)
         return self._model.with_structured_output(_Description)
 
-    def describe(self, asset: MediaAsset, scene: SceneSegment) -> ShotDescription:
+    def describe(self, asset: MediaAsset, scene: SceneSegment, window: float = 20.0) -> ShotDescription:
+        """Describe a shot. Long shots (a 10-minute walk filmed in one take) are described window by
+        window, in parallel, so the moments stay precise all along the shot."""
+        if scene.end - scene.start <= window * 1.5:
+            return self._describe_window(asset, scene.start, scene.end)
+        count = math.ceil((scene.end - scene.start) / window)
+        edges = [scene.start + i * window for i in range(count)] + [scene.end]
+        if len(edges) > 2 and edges[-1] - edges[-2] < window / 2:  # merge a short tail into the previous window
+            edges.pop(-2)
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            parts = list(pool.map(lambda w: self._describe_window(asset, *w), zip(edges, edges[1:], strict=False)))
+        first = parts[0]
+        return ShotDescription(
+            summary=" Then: ".join(p.summary for p in parts[:3]) + (" …" if len(parts) > 3 else ""),
+            location=first.location, subjects=_unique(x for p in parts for x in p.subjects),
+            shot_size=first.shot_size, camera=first.camera, mood=first.mood,
+            issues=_unique(x for p in parts for x in p.issues),
+            moments=[m for p in parts for m in p.moments], tags=_unique(x for p in parts for x in p.tags)[:15])
+
+    def _describe_window(self, asset: MediaAsset, start: float, end: float) -> ShotDescription:
+        scene = SceneSegment(shot_id="window", start=start, end=end)
         times = sample_times(scene.start, scene.end, self.frames_per_shot)
         content: list[dict] = [{"type": "text", "text": f"Shot from {scene.start:.1f}s to {scene.end:.1f}s."}]
         with tempfile.TemporaryDirectory() as tmp:
@@ -89,6 +111,15 @@ class VisionDescriber:
             m["start"] = round(min(max(m["start"], scene.start), scene.end), 2)
             m["end"] = round(min(max(m["end"], m["start"]), scene.end), 2)
         return ShotDescription(**{**result.model_dump(), "moments": [m for m in moments if m["end"] > m["start"]]})
+
+
+def _unique(items) -> list[str]:
+    seen, out = set(), []
+    for item in items:
+        if item.lower() not in seen:
+            seen.add(item.lower())
+            out.append(item)
+    return out
 
 
 def sample_times(start: float, end: float, count: int) -> list[float]:

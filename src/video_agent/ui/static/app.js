@@ -333,7 +333,7 @@ function renderJobs(serverJobs = []) {
 renderJobs.doneAt = {};
 
 function upload(files) {
-  const videos = [...files].filter((f) => f.type.startsWith("video/") || /\.(mp4|mov|mxf|mkv|avi|m4v|webm)$/i.test(f.name));
+  const videos = [...files].filter((f) => f.type.startsWith("video/") || /\.(mp4|mov|mxf|mkv|avi|m4v|webm|insv|lrv)$/i.test(f.name));
   if (!videos.length) return toast("Only video files can be imported.");
   const entry = { name: videos.length === 1 ? videos[0].name : `${videos.length} files`, progress: 0, error: null };
   uploads.push(entry);
@@ -373,6 +373,25 @@ async function pollJobs() {
 pollJobs.seen = new Set();
 
 els.importBtn.addEventListener("click", () => els.fileInput.click());
+const pathForm = $("path-form"), pathInput = $("path-input"), pathToggle = $("path-toggle");
+pathToggle.addEventListener("click", () => {
+  pathForm.hidden = !pathForm.hidden;
+  if (!pathForm.hidden) pathInput.focus();
+});
+pathForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const path = pathInput.value.trim();
+  if (!path) return;
+  try {
+    const { jobs } = await api("/api/import-path", { path });
+    toast(`${jobs.length} file${jobs.length > 1 ? "s" : ""} queued for import.`, "info");
+    pathInput.value = "";
+    pathForm.hidden = true;
+    pollJobs();
+  } catch (err) {
+    toast(err.message);
+  }
+});
 els.fileInput.addEventListener("change", () => { upload(els.fileInput.files); els.fileInput.value = ""; });
 let dragDepth = 0;
 els.library.addEventListener("dragenter", (e) => { if (e.dataTransfer?.types.includes("Files")) { e.preventDefault(); dragDepth++; els.dropzone.hidden = false; } });

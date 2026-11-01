@@ -122,6 +122,16 @@ have not analyzed anything yet. Without the `analysis` extra, imports fall back 
 shot per file, with a keyframe but no transcript. Imports use Whisper `small` by default, for a
 reasonable wait (`--whisper-model` to change it).
 
+**360° cameras (Insta360 `.insv`)**: a `.insv` file holds the two fisheye lenses of the camera. On import,
+each lens is re-projected on its own into a flat vertical 1080×1920 video with ffmpeg's `v360` filter (no
+stitching, so no seam), giving two synchronized rushes per clip: `<clip>_lens1` and `<clip>_lens2`, usually
+the scene in front and a selfie of the person filming. The agent treats them as a two-camera shoot and cuts
+between them while keeping time moving forward; `build_timeline` flags any clip that replays seconds already
+shown from the other lens. The soundtrack is transcribed once for both views. On a Mac, HEVC decoding uses
+VideoToolbox: about 3× faster, 6 s for 12 s of 8K footage. Use *Import from a folder* for these files: they
+are read in place instead of being uploaded (a 10-minute clip weighs about 9 GB), and `.lrv` proxies are
+skipped. Not handled yet: Insta360's gyro stabilization and free reframing (any yaw/pitch) during the edit.
+
 **Delete a rush** with the bin icon on any of its shots: its shots leave the library and its clips
 leave the timeline. Only files the UI owns are deleted from disk (imported copies and keyframes);
 original rushes analyzed with `video-agent analyze` are never touched.
@@ -176,6 +186,7 @@ src/video_agent/
 ├── agent.py          # Editing agent (also exposed to `langgraph dev`)
 ├── ui/               # FastAPI server + static page (no build step), chat streamed as SSE
 ├── library.py        # Rush import from the UI: background analysis and re-indexing
+├── insta360.py       # 360° .insv files: one flat view per fisheye lens
 ├── demo.py           # Synthetic demo rushes
 └── cli.py            # video-agent analyze | chat | ui
 tests/                # Fast tests, no model or API key needed
@@ -187,6 +198,7 @@ tests/                # Fast tests, no model or API key needed
 - **Timeline atoms as the shared language.** Each shot carries its timecodes, overlapping transcript and captions, so the agent reasons about *shots* instead of raw frames or audio.
 - **Keyword and semantic search, over speech and image.** FTS5 handles exact words and names; embeddings handle "the part where they talk about the weather". Both include the BLIP captions, so "the wide shot of the beach" works even when nobody speaks.
 - **Heavy models are optional dependencies, loaded lazily.** The store, timeline and agent install and test without PyTorch, which keeps CI fast.
+- **Long shots are logged in 20 s windows.** A 360 walk is one continuous take with no cut, so one description for the whole shot would give the agent a handful of vague moments for ten minutes of footage. Long shots are described window by window, four in parallel, and the moments are concatenated.
 - **Logging before editing.** The first version only had one BLIP caption per shot, and no way to cut inside a rush: asked for a travel vlog, the agent put whole rushes end to end. What made the difference was not a bigger model but better material and better tools: a vision model that logs each shot like an assistant editor (place, shot size, good and bad moments with timecodes), in and out points on every clip, and a prompt that describes the editing craft. On the same request and the same rushes, the agent went from 6 full rushes in file order (42 s) to a 20 s edit with trimmed clips, a hook, a story order and a closing shot.
 - **One lock per timeline file.** Models call tools in parallel (three `insert_shot` at once is common), and each edit is a load → modify → save cycle on the `.otio` file. Without the lock, parallel inserts overwrote each other: this was caught in a real session with the UI, and a test now covers it.
 - **OTIO as the output format.** It's an open, non-destructive timeline format, so the rough cut isn't locked into this tool.

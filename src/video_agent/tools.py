@@ -55,6 +55,19 @@ def _timeline_view(clips: list[dict]) -> dict:
                                          "source_start", "source_end")} for c in clips]}
 
 
+def replay_warnings(clips: list[dict]) -> list[str]:
+    """Consecutive clips from the two lenses of one 360 clip should move forward in time: flag replays."""
+    warnings = []
+    for prev, cur in zip(clips, clips[1:], strict=False):
+        a, b = prev["shot_id"].split("_lens"), cur["shot_id"].split("_lens")
+        if len(a) == 2 and len(b) == 2 and a[0] == b[0] and a[1] != b[1] \
+                and cur["source_start"] < prev["source_end"] - 0.1:
+            warnings.append(f"Clip {cur['index']} replays {cur['source_start']:.1f}-{prev['source_end']:.1f}s already "
+                            f"shown by clip {prev['index']} from the other lens (the sound repeats). Start it at "
+                            f"{prev['source_end']:.1f}s unless a replay is intended.")
+    return warnings
+
+
 def build_tools(store: MediaStore, timeline: TimelineManager, output_dir: Path | str = "output") -> list[BaseTool]:
     output_dir = Path(output_dir)
 
@@ -99,7 +112,11 @@ def build_tools(store: MediaStore, timeline: TimelineManager, output_dir: Path |
         for spec in clips:
             shot = shot_or_fail(spec.shot_id)
             shots.append({**shot, "in": spec.start, "out": spec.end})
-        return _timeline_view(timeline.replace_all(shots, name))
+        clips = timeline.replace_all(shots, name)
+        view = _timeline_view(clips)
+        if warnings := replay_warnings(clips):
+            view["warnings"] = warnings
+        return view
 
     @tool
     @_recoverable

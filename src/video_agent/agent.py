@@ -38,6 +38,11 @@ Editing craft:
   Skip the first and last half second of a handheld rush: that is where the phone moves.
 - Speech: cut between sentences, never inside one. Keep a full sentence when it carries meaning.
 - You do not have to use every rush, and you can use two moments of the same rush at different places.
+- Rushes named <clip>_lens1 and <clip>_lens2 are the two lenses of one 360° camera: two angles of the same
+  moment, in sync (same timecodes, same sound), usually the scene in front and a selfie of the person
+  filming. Cut between them like a two-camera shoot, and keep time moving forward: when you switch angle,
+  start where the previous clip ended (scene 1.0-2.8 s, then selfie 2.8-4.5 s, then scene 4.5-6.0 s), so
+  the sound stays continuous. Never replay the same seconds from the other angle unless asked for a replay.
 - Only use what the shots show: do not claim a place, a person or an event that the descriptions do not
   support. If the material is thin or a requested element is missing, say so.
 

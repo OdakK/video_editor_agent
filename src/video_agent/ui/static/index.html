@@ -33,8 +33,14 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 15V4m0 0l-4.5 4.5M12 4l4.5 4.5M5 15v3.5A1.5 1.5 0 006.5 20h11a1.5 1.5 0 001.5-1.5V15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>
           Import
         </button>
-        <input type="file" id="file-input" accept="video/*,.mxf,.mkv,.webm" multiple hidden>
+        <input type="file" id="file-input" accept="video/*,.mxf,.mkv,.webm,.insv,.lrv" multiple hidden>
       </div>
+      <form class="path-import" id="path-form" hidden>
+        <input id="path-input" type="text" placeholder="/Users/you/Videos/Trip" aria-label="Folder or file to import"
+               autocomplete="off" spellcheck="false">
+        <button class="btn small primary" type="submit">Add</button>
+      </form>
+      <button class="link" id="path-toggle" type="button">Large files or 360° (.insv)? Import from a folder</button>
       <ul class="jobs" id="jobs" aria-live="polite"></ul>
       <label class="search">
         <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6.5" fill="none" stroke="currentColor" stroke-width="2"/><path d="M16 16l4.5 4.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>

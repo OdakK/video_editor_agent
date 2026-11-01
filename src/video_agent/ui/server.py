@@ -65,6 +65,10 @@ class MoveRequest(BaseModel):
     new_index: int
 
 
+class ImportPathRequest(BaseModel):
+    path: str
+
+
 class RemoveRequest(BaseModel):
     clip_id: str
 
@@ -127,6 +131,16 @@ def create_app(session: Session) -> FastAPI:
             except ValueError as exc:
                 errors.append(str(exc))
         return {"jobs": jobs, "errors": errors}
+
+    @app.post("/api/import-path")
+    def import_path(req: ImportPathRequest) -> dict:
+        """Import files from this computer in place, without uploading them (large 360 files)."""
+        if session.library is None:
+            raise HTTPException(400, "Import is not available in this session.")
+        try:
+            return {"jobs": [j.as_dict() for j in session.library.import_path(req.path)]}
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
 
     @app.delete("/api/rushes/{asset_id}")
     def delete_rush(asset_id: str) -> dict:

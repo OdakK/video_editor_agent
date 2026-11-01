@@ -109,6 +109,17 @@ svg { width: 16px; height: 16px; flex: none; }
 }
 .dropzone svg { width: 34px; height: 34px; color: var(--accent); }
 .dropzone p { margin: 0; font-weight: 600; }
+.link {
+  background: none; border: 0; padding: 0; margin: -4px 16px 10px; color: var(--muted); font-size: 12px;
+  text-align: left; text-decoration: underline; text-underline-offset: 2px;
+}
+.link:hover { color: var(--text); }
+.path-import { display: flex; gap: 6px; margin: 0 16px 10px; }
+.path-import input {
+  flex: 1; min-width: 0; padding: 6px 9px; border-radius: 8px; border: 1px solid var(--line-strong);
+  background: var(--panel); font: 12.5px var(--mono); outline: none;
+}
+.path-import input:focus { border-color: var(--accent); }
 .import-note { color: var(--faint); font-size: 12px; margin: -4px 16px 10px; }
 .search {
   margin: 0 16px 12px; display: flex; align-items: center; gap: 8px; padding: 0 10px;
