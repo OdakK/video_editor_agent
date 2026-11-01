@@ -1,8 +1,8 @@
 {
   "dependencies": ["."],
   "graphs": {
-    "agent": "./src/workflows/agent.py:agent",
-    "analysis": "./src/workflows/analysis.py:create_analysis_workflow"
+    "agent": "./src/video_agent/agent.py:make_graph",
+    "analysis": "./src/video_agent/analysis/workflow.py:make_graph"
   },
   "env": ".env"
 }
